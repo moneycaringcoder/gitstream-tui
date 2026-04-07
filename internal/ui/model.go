@@ -259,15 +259,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 		} else {
 			now := time.Now()
+			recentThreshold := time.Duration(m.cfg.Interval) * time.Second * 2
 			newCount := 0
 			for _, ev := range msg.events {
 				if m.seen[ev.ID] {
 					continue
 				}
 				m.seen[ev.ID] = true
-				addedAt := now
-				if !m.firstPoll {
-					addedAt = time.Time{} // zero = no flash for initial load
+				addedAt := time.Time{} // zero = no flash by default
+				// Only flash if this is a genuinely recent event
+				if m.firstPoll && now.Sub(ev.CreatedAt) < recentThreshold {
+					addedAt = now
 				}
 				de := DisplayEvent{Event: ev, AddedAt: addedAt}
 				m.events = append(m.events, de)
@@ -320,9 +322,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					},
 					CreatedAt: commitTime,
 				}
-				addedAt := now
-				if !m.firstPoll {
-					addedAt = time.Time{}
+				addedAt := time.Time{}
+				if m.firstPoll && now.Sub(commitTime) < 2*time.Minute {
+					addedAt = now
 				}
 				m.events = append(m.events, DisplayEvent{Event: ev, AddedAt: addedAt})
 				newLocal++
