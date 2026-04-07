@@ -82,6 +82,23 @@ var (
 
 	PanelCIFailStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#ef4444"))
+
+	CursorMarker = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#3b82f6")).
+			Bold(true)
+
+	CursorRowBg = lipgloss.NewStyle().
+			Background(lipgloss.Color("#1a1a2e"))
+
+	FocusBadgeActive = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("#000000")).
+				Background(lipgloss.Color("#3b82f6")).
+				Padding(0, 1)
+
+	FocusBadgeInactive = lipgloss.NewStyle().
+				Foreground(ColorDim).
+				Padding(0, 1)
 )
 
 // EventColor returns the color for a given event type.

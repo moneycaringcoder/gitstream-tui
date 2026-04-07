@@ -65,10 +65,14 @@ type Model struct {
 	typeFilter    string // filter by event type label
 	newestFirst   bool   // sort order: true = newest on top
 	firstPoll     bool   // true after first poll completes
-	localRepos    []discovery.LocalRepo
-	repoStatus    []gitstatus.RepoStatus
-	seenLocalSHAs map[string]bool
-	configUI      configState
+	streamCursor    int // cursor row index in filtered events
+	streamLineCount int // total visible lines in stream
+	panelCursor     int // cursor row index in panel content
+	panelLineCount  int // total visible lines in panel
+	localRepos      []discovery.LocalRepo
+	repoStatus      []gitstatus.RepoStatus
+	seenLocalSHAs   map[string]bool
+	configUI        configState
 }
 
 // Messages
@@ -170,10 +174,62 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.rebuildViewport()
 		case "left", "h":
 			m.focus = focusStream
+			m.rebuildViewport()
+			m.rebuildPanelContent()
 		case "right", "l":
 			if m.hasPanel() {
 				m.focus = focusPanel
+				m.rebuildViewport()
+				m.rebuildPanelContent()
 			}
+		case "up", "k":
+			if m.focus == focusPanel {
+				if m.panelCursor > 0 {
+					m.panelCursor--
+				}
+			} else {
+				if m.streamCursor > 0 {
+					m.streamCursor--
+				}
+			}
+			m.rebuildViewport()
+			m.rebuildPanelContent()
+			m.ensureCursorVisible()
+			return m, nil
+		case "down", "j":
+			if m.focus == focusPanel {
+				if m.panelCursor < m.panelLineCount-1 {
+					m.panelCursor++
+				}
+			} else {
+				if m.streamCursor < m.streamLineCount-1 {
+					m.streamCursor++
+				}
+			}
+			m.rebuildViewport()
+			m.rebuildPanelContent()
+			m.ensureCursorVisible()
+			return m, nil
+		case "home", "g":
+			if m.focus == focusPanel {
+				m.panelCursor = 0
+			} else {
+				m.streamCursor = 0
+			}
+			m.rebuildViewport()
+			m.rebuildPanelContent()
+			m.ensureCursorVisible()
+			return m, nil
+		case "end", "G":
+			if m.focus == focusPanel {
+				m.panelCursor = max(0, m.panelLineCount-1)
+			} else {
+				m.streamCursor = max(0, m.streamLineCount-1)
+			}
+			m.rebuildViewport()
+			m.rebuildPanelContent()
+			m.ensureCursorVisible()
+			return m, nil
 		}
 
 	case tea.WindowSizeMsg:
@@ -181,7 +237,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		headerHeight := 4
 		footerHeight := 2
-		contentHeight := msg.Height - headerHeight - footerHeight
+		badgeHeight := 1
+		contentHeight := msg.Height - headerHeight - footerHeight - badgeHeight
 		streamWidth := m.streamWidth()
 		if !m.ready {
 			m.viewport = viewport.New(streamWidth, contentHeight)
@@ -317,6 +374,26 @@ func (m *Model) hasPanel() bool {
 	return len(m.localRepos) > 0 && m.width-statusPanelWidth-3 >= 40
 }
 
+func (m *Model) ensureCursorVisible() {
+	if m.focus == focusPanel {
+		vpHeight := m.panelViewport.Height
+		yOffset := m.panelViewport.YOffset
+		if m.panelCursor < yOffset {
+			m.panelViewport.SetYOffset(m.panelCursor)
+		} else if m.panelCursor >= yOffset+vpHeight {
+			m.panelViewport.SetYOffset(m.panelCursor - vpHeight + 1)
+		}
+	} else {
+		vpHeight := m.viewport.Height
+		yOffset := m.viewport.YOffset
+		if m.streamCursor < yOffset {
+			m.viewport.SetYOffset(m.streamCursor)
+		} else if m.streamCursor >= yOffset+vpHeight {
+			m.viewport.SetYOffset(m.streamCursor - vpHeight + 1)
+		}
+	}
+}
+
 func (m *Model) skipEvent(de DisplayEvent) bool {
 	if m.filter != "" && de.Event.ShortRepo() != m.filter {
 		return true
@@ -331,23 +408,39 @@ func (m *Model) rebuildViewport() {
 	now := time.Now()
 	sw := m.streamWidth()
 	var lines []string
+	isFocused := m.focus == focusStream
+
+	addLine := func(de DisplayEvent) {
+		flash := !de.AddedAt.IsZero() && now.Before(de.AddedAt.Add(flashDuration))
+		line := renderEventLine(de.Event, now, flash, sw)
+		idx := len(lines)
+		if isFocused && idx == m.streamCursor {
+			line = CursorMarker.Render("▌") + " " + line
+		} else {
+			line = "  " + line
+		}
+		lines = append(lines, line)
+	}
+
 	if m.newestFirst {
 		for i := len(m.events) - 1; i >= 0; i-- {
 			de := m.events[i]
 			if m.skipEvent(de) {
 				continue
 			}
-			flash := !de.AddedAt.IsZero() && now.Before(de.AddedAt.Add(flashDuration))
-			lines = append(lines, renderEventLine(de.Event, now, flash, sw))
+			addLine(de)
 		}
 	} else {
 		for _, de := range m.events {
 			if m.skipEvent(de) {
 				continue
 			}
-			flash := !de.AddedAt.IsZero() && now.Before(de.AddedAt.Add(flashDuration))
-			lines = append(lines, renderEventLine(de.Event, now, flash, sw))
+			addLine(de)
 		}
+	}
+	m.streamLineCount = len(lines)
+	if m.streamCursor >= m.streamLineCount && m.streamLineCount > 0 {
+		m.streamCursor = m.streamLineCount - 1
 	}
 	m.viewport.SetContent(strings.Join(lines, "\n"))
 }
@@ -459,12 +552,21 @@ func (m Model) View() string {
 		fmt.Sprintf("q quit | p pause | r refresh | c config | s sort (%s) | t type | ←/→ focus (%s) | 1-%d repo | 0 clear%s",
 			sortLabel, focusLabel, len(m.cfg.Repos()), extra))
 
-	// Build main content area
-	streamView := m.viewport.View()
+	// Build main content area with focus badges
+	streamBadge := FocusBadgeInactive.Render("Stream")
+	if m.focus == focusStream {
+		streamBadge = FocusBadgeActive.Render("Stream")
+	}
+	streamView := lipgloss.JoinVertical(lipgloss.Left, streamBadge, m.viewport.View())
 
 	if m.hasPanel() {
+		panelBadge := FocusBadgeInactive.Render("Local")
+		if m.focus == focusPanel {
+			panelBadge = FocusBadgeActive.Render("Local")
+		}
 		panel := m.renderStatusPanel()
-		streamView = lipgloss.JoinHorizontal(lipgloss.Top, streamView, " ", panel)
+		panelWithBadge := lipgloss.JoinVertical(lipgloss.Left, panelBadge, panel)
+		streamView = lipgloss.JoinHorizontal(lipgloss.Top, streamView, " ", panelWithBadge)
 	}
 
 	// Compose
@@ -490,9 +592,19 @@ func sortedRepoStatus(statuses []gitstatus.RepoStatus) []gitstatus.RepoStatus {
 
 func (m *Model) rebuildPanelContent() {
 	var lines []string
+	isFocused := m.focus == focusPanel
+
+	addLine := func(line string) {
+		idx := len(lines)
+		if isFocused && idx == m.panelCursor {
+			line = CursorMarker.Render("▌") + line
+		}
+		lines = append(lines, line)
+	}
 
 	if len(m.repoStatus) == 0 {
-		lines = append(lines, PanelDimStyle.Render("Scanning..."))
+		addLine(PanelDimStyle.Render("Scanning..."))
+		m.panelLineCount = len(lines)
 		m.panelViewport.SetContent(strings.Join(lines, "\n"))
 		return
 	}
@@ -506,27 +618,27 @@ func (m *Model) rebuildPanelContent() {
 		}
 
 		if s.Error != nil {
-			lines = append(lines, PanelRepoStyle.Render(short))
-			lines = append(lines, PanelDimStyle.Render("  error"))
-			lines = append(lines, "")
+			addLine(PanelRepoStyle.Render(short))
+			addLine(PanelDimStyle.Render("  error"))
+			addLine("")
 			continue
 		}
 
-		lines = append(lines, PanelRepoStyle.Render(short))
+		addLine(PanelRepoStyle.Render(short))
 
 		// Branch
-		lines = append(lines, PanelDimStyle.Render(fmt.Sprintf("  ᛘ %s", s.Branch)))
+		addLine(PanelDimStyle.Render(fmt.Sprintf("  ᛘ %s", s.Branch)))
 
 		// Status indicators
 		if s.Uncommitted == 0 && s.Unpushed == 0 {
-			lines = append(lines, PanelCleanStyle.Render("  ✓ clean"))
+			addLine(PanelCleanStyle.Render("  ✓ clean"))
 		} else {
 			if s.Uncommitted > 0 {
-				lines = append(lines, PanelDirtyStyle.Render(
+				addLine(PanelDirtyStyle.Render(
 					fmt.Sprintf("  ● %d uncommitted", s.Uncommitted)))
 			}
 			if s.Unpushed > 0 {
-				lines = append(lines, PanelWarnStyle.Render(
+				addLine(PanelWarnStyle.Render(
 					fmt.Sprintf("  ↑ %d unpushed", s.Unpushed)))
 				for _, c := range s.UnpushedCommits {
 					msg := c.Message
@@ -534,13 +646,13 @@ func (m *Model) rebuildPanelContent() {
 					if len(msg) > maxLen {
 						msg = msg[:maxLen-1] + "…"
 					}
-					lines = append(lines, PanelDimStyle.Render(
+					addLine(PanelDimStyle.Render(
 						fmt.Sprintf("    %s %s", c.SHA, msg)))
 				}
 			}
 		}
 		if !s.HasUpstream {
-			lines = append(lines, PanelDimStyle.Render("  ⚠ no upstream"))
+			addLine(PanelDimStyle.Render("  ⚠ no upstream"))
 		}
 
 		// CI status
@@ -560,27 +672,27 @@ func (m *Model) rebuildPanelContent() {
 					ciLine = PanelDimStyle.Render(fmt.Sprintf("  ○ CI %s", s.CI.Conclusion))
 				}
 			}
-			lines = append(lines, ciLine)
+			addLine(ciLine)
 		}
 
-		lines = append(lines, "")
+		addLine("")
 	}
 
+	m.panelLineCount = len(lines)
+	if m.panelCursor >= m.panelLineCount && m.panelLineCount > 0 {
+		m.panelCursor = m.panelLineCount - 1
+	}
 	m.panelViewport.SetContent(strings.Join(lines, "\n"))
 }
 
 func (m Model) renderStatusPanel() string {
 	headerHeight := 4
 	footerHeight := 2
-	panelHeight := m.height - headerHeight - footerHeight
+	badgeHeight := 1
+	panelHeight := m.height - headerHeight - footerHeight - badgeHeight
 
 	// Title + divider outside the scrollable area
-	title := PanelTitleStyle.Render("Local Status")
-	focusIndicator := ""
-	if m.focus == focusPanel {
-		focusIndicator = " ◀"
-	}
-	titleLine := title + PanelDimStyle.Render(focusIndicator)
+	titleLine := PanelTitleStyle.Render("Local Status")
 	divider := PanelDividerStyle.Render(strings.Repeat("─", statusPanelWidth-2))
 
 	// The viewport content is scrollable
