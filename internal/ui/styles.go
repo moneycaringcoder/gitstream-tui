@@ -46,6 +46,9 @@ var (
 
 	HelpStyle = lipgloss.NewStyle().
 			Foreground(ColorDim)
+
+	FlashStyle = lipgloss.NewStyle().
+			Background(lipgloss.Color("#1e3a5f"))
 )
 
 // EventColor returns the color for a given event type.

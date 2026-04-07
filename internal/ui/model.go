@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -13,25 +14,29 @@ import (
 	"github.com/moneycaringcoder/gitstream-tui/internal/github"
 )
 
+const flashDuration = 3 * time.Second
+
 // DisplayEvent holds a parsed event for display.
 type DisplayEvent struct {
-	Event github.Event
+	Event   github.Event
+	AddedAt time.Time
 }
 
 // Model is the main Bubble Tea model.
 type Model struct {
-	cfg      *config.Config
-	events   []DisplayEvent
-	seen     map[string]bool
-	viewport viewport.Model
-	width    int
-	height   int
-	ready    bool
-	err      error
-	lastPoll time.Time
-	paused     bool
-	filter     string // filter by repo name
-	newestFirst bool  // sort order: true = newest on top
+	cfg         *config.Config
+	events      []DisplayEvent
+	seen        map[string]bool
+	viewport    viewport.Model
+	width       int
+	height      int
+	ready       bool
+	err         error
+	lastPoll    time.Time
+	paused      bool
+	filter      string // filter by repo name
+	newestFirst bool   // sort order: true = newest on top
+	firstPoll   bool   // true after first poll completes
 }
 
 // Messages
@@ -110,20 +115,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.err = msg.err
 		} else {
+			now := time.Now()
 			newCount := 0
-			for i := len(msg.events) - 1; i >= 0; i-- {
-				ev := msg.events[i]
+			for _, ev := range msg.events {
 				if m.seen[ev.ID] {
 					continue
 				}
 				m.seen[ev.ID] = true
-				de := DisplayEvent{Event: ev}
+				addedAt := now
+				if !m.firstPoll {
+					addedAt = time.Time{} // zero = no flash for initial load
+				}
+				de := DisplayEvent{Event: ev, AddedAt: addedAt}
 				m.events = append(m.events, de)
 				newCount++
 			}
+			m.firstPoll = true
 			if newCount > 0 {
+				sort.Slice(m.events, func(i, j int) bool {
+					return m.events[i].Event.CreatedAt.Before(m.events[j].Event.CreatedAt)
+				})
 				m.rebuildViewport()
-				// Auto-scroll to bottom if near bottom
 				m.viewport.GotoBottom()
 			}
 		}
@@ -155,14 +167,16 @@ func (m *Model) rebuildViewport() {
 			if m.filter != "" && de.Event.ShortRepo() != m.filter {
 				continue
 			}
-			lines = append(lines, renderEventLine(de.Event, now))
+			flash := !de.AddedAt.IsZero() && now.Before(de.AddedAt.Add(flashDuration))
+			lines = append(lines, renderEventLine(de.Event, now, flash, m.width))
 		}
 	} else {
 		for _, de := range m.events {
 			if m.filter != "" && de.Event.ShortRepo() != m.filter {
 				continue
 			}
-			lines = append(lines, renderEventLine(de.Event, now))
+			flash := !de.AddedAt.IsZero() && now.Before(de.AddedAt.Add(flashDuration))
+			lines = append(lines, renderEventLine(de.Event, now, flash, m.width))
 		}
 	}
 	m.viewport.SetContent(strings.Join(lines, "\n"))
@@ -226,7 +240,7 @@ func relativeTime(t time.Time, now time.Time) string {
 	}
 }
 
-func renderEventLine(ev github.Event, now time.Time) string {
+func renderEventLine(ev github.Event, now time.Time, flash bool, width int) string {
 	t := ev.CreatedAt.Local().Format("15:04:05")
 	rel := relativeTime(ev.CreatedAt, now)
 	timeStr := fmt.Sprintf("%s %s", t, rel)
@@ -235,13 +249,19 @@ func renderEventLine(ev github.Event, now time.Time) string {
 	actor := ev.Actor.Login
 	repo := ev.ShortRepo()
 
-	return fmt.Sprintf("%s  %s %s %s %s",
+	line := fmt.Sprintf("%s  %s %s %s %s",
 		TimeStyle.Render(timeStr),
 		RepoStyle.Render(repo),
 		LabelStyle(ev.Type).Render(label),
 		ActorStyle.Render(actor),
 		DetailStyle.Render(detail),
 	)
+
+	if flash {
+		line = FlashStyle.Width(width).Render(line)
+	}
+
+	return line
 }
 
 func pollEvents(cfg *config.Config) tea.Cmd {
