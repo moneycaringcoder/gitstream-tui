@@ -21,6 +21,7 @@ const flashDuration = 3 * time.Second
 // typeFilters is the cycle order for the 't' key.
 var typeFilters = []string{
 	"", // all
+	"LocalPushEvent",
 	"PushEvent",
 	"PullRequestEvent",
 	"PullRequestReviewEvent",
@@ -39,24 +40,35 @@ type DisplayEvent struct {
 
 const statusPanelWidth = 32
 
+type focusPane int
+
+const (
+	focusStream focusPane = iota
+	focusPanel
+)
+
 // Model is the main Bubble Tea model.
 type Model struct {
-	cfg         *config.Config
-	events      []DisplayEvent
-	seen        map[string]bool
-	viewport    viewport.Model
-	width       int
-	height      int
-	ready       bool
-	err         error
-	lastPoll    time.Time
-	paused      bool
-	filter      string // filter by repo name
-	typeFilter  string // filter by event type label
-	newestFirst bool   // sort order: true = newest on top
-	firstPoll   bool   // true after first poll completes
-	localRepos  []discovery.LocalRepo
-	repoStatus  []gitstatus.RepoStatus
+	cfg           *config.Config
+	events        []DisplayEvent
+	seen          map[string]bool
+	viewport      viewport.Model
+	panelViewport viewport.Model
+	focus         focusPane
+	width         int
+	height        int
+	ready         bool
+	err           error
+	lastPoll      time.Time
+	paused        bool
+	filter        string // filter by repo name
+	typeFilter    string // filter by event type label
+	newestFirst   bool   // sort order: true = newest on top
+	firstPoll     bool   // true after first poll completes
+	localRepos    []discovery.LocalRepo
+	repoStatus    []gitstatus.RepoStatus
+	seenLocalSHAs map[string]bool
+	configUI      configState
 }
 
 // Messages
@@ -75,9 +87,10 @@ type gitStatusMsg struct {
 
 func NewModel(cfg *config.Config) Model {
 	return Model{
-		cfg:    cfg,
-		seen:   make(map[string]bool),
-		events: make([]DisplayEvent, 0, 256),
+		cfg:           cfg,
+		seen:          make(map[string]bool),
+		seenLocalSHAs: make(map[string]bool),
+		events:        make([]DisplayEvent, 0, 256),
 	}
 }
 
@@ -91,11 +104,22 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Config editor takes over input when active
+	if m.configUI.active {
+		if msg, ok := msg.(tea.KeyMsg); ok {
+			return m.updateConfig(msg)
+		}
+		// Still handle non-key messages (ticks, window resize, etc.)
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
+		case "c":
+			m.configUI = configState{active: true}
+			return m, nil
 		case "p":
 			m.paused = !m.paused
 		case "r":
@@ -144,6 +168,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.typeFilter = typeFilters[(cur-1+len(typeFilters))%len(typeFilters)]
 			m.rebuildViewport()
+		case "left", "h":
+			m.focus = focusStream
+		case "right", "l":
+			if m.hasPanel() {
+				m.focus = focusPanel
+			}
 		}
 
 	case tea.WindowSizeMsg:
@@ -151,16 +181,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		headerHeight := 4
 		footerHeight := 2
+		contentHeight := msg.Height - headerHeight - footerHeight
 		streamWidth := m.streamWidth()
 		if !m.ready {
-			m.viewport = viewport.New(streamWidth, msg.Height-headerHeight-footerHeight)
+			m.viewport = viewport.New(streamWidth, contentHeight)
 			m.viewport.YPosition = headerHeight
+			m.panelViewport = viewport.New(statusPanelWidth-4, contentHeight-4) // border + title/divider
 			m.ready = true
 		} else {
 			m.viewport.Width = streamWidth
-			m.viewport.Height = msg.Height - headerHeight - footerHeight
+			m.viewport.Height = contentHeight
+			m.panelViewport.Width = statusPanelWidth - 4
+			m.panelViewport.Height = contentHeight - 4
 		}
 		m.rebuildViewport()
+		m.rebuildPanelContent()
 
 	case eventsMsg:
 		if msg.err != nil {
@@ -202,6 +237,46 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case gitStatusMsg:
 		m.repoStatus = msg.statuses
+		m.rebuildPanelContent()
+		// Inject unpushed commits into the event stream
+		now := time.Now()
+		newLocal := 0
+		for _, s := range msg.statuses {
+			for _, c := range s.UnpushedCommits {
+				key := s.Remote + ":" + c.SHA
+				if m.seenLocalSHAs[key] {
+					continue
+				}
+				m.seenLocalSHAs[key] = true
+				commitTime, _ := time.Parse(time.RFC3339, c.Date)
+				if commitTime.IsZero() {
+					commitTime = now
+				}
+				ev := github.Event{
+					ID:   "local-" + key,
+					Type: "LocalPushEvent",
+					Actor: github.Actor{Login: c.Author},
+					Repo:  github.Repo{Name: s.Remote},
+					Payload: github.Payload{
+						Ref:     s.Branch,
+						Commits: []github.Commit{{SHA: c.SHA, Message: c.Message}},
+					},
+					CreatedAt: commitTime,
+				}
+				addedAt := now
+				if !m.firstPoll {
+					addedAt = time.Time{}
+				}
+				m.events = append(m.events, DisplayEvent{Event: ev, AddedAt: addedAt})
+				newLocal++
+			}
+		}
+		if newLocal > 0 {
+			sort.Slice(m.events, func(i, j int) bool {
+				return m.events[i].Event.CreatedAt.Before(m.events[j].Event.CreatedAt)
+			})
+			m.rebuildViewport()
+		}
 
 	case uiTickMsg:
 		m.rebuildViewport()
@@ -219,7 +294,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	var cmd tea.Cmd
-	m.viewport, cmd = m.viewport.Update(msg)
+	if m.focus == focusPanel && m.hasPanel() {
+		m.panelViewport, cmd = m.panelViewport.Update(msg)
+	} else {
+		m.viewport, cmd = m.viewport.Update(msg)
+	}
 	return m, cmd
 }
 
@@ -273,9 +352,75 @@ func (m *Model) rebuildViewport() {
 	m.viewport.SetContent(strings.Join(lines, "\n"))
 }
 
+func (m Model) updateConfig(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	if m.configUI.editing {
+		switch key {
+		case "enter":
+			f := configFields[m.configUI.cursor]
+			if err := f.set(m.cfg, m.configUI.editBuf); err != nil {
+				m.configUI.editErr = err.Error()
+			} else {
+				m.configUI.editing = false
+				m.configUI.editErr = ""
+				m.configUI.dirty = true
+			}
+		case "esc":
+			m.configUI.editing = false
+			m.configUI.editBuf = ""
+			m.configUI.editErr = ""
+		case "backspace":
+			if len(m.configUI.editBuf) > 0 {
+				m.configUI.editBuf = m.configUI.editBuf[:len(m.configUI.editBuf)-1]
+			}
+		default:
+			if len(key) == 1 && key[0] >= 32 && key[0] <= 126 {
+				m.configUI.editBuf += key
+			}
+		}
+		return m, nil
+	}
+
+	// Navigation mode
+	switch key {
+	case "j", "down":
+		if m.configUI.cursor < len(configFields)-1 {
+			m.configUI.cursor++
+		}
+	case "k", "up":
+		if m.configUI.cursor > 0 {
+			m.configUI.cursor--
+		}
+	case "enter":
+		f := configFields[m.configUI.cursor]
+		m.configUI.editing = true
+		m.configUI.editBuf = f.get(m.cfg)
+		m.configUI.editErr = ""
+	case "ctrl+s":
+		config.Save(m.cfg)
+		m.configUI.dirty = false
+		m.configUI.savedNotice = 20
+	case "esc", "c":
+		if m.configUI.dirty {
+			config.Save(m.cfg)
+		}
+		m.configUI.active = false
+		// Re-trigger discovery in case repos changed
+		return m, discoverRepos(m.cfg)
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
 func (m Model) View() string {
 	if !m.ready {
 		return "Initializing..."
+	}
+
+	if m.configUI.active {
+		return m.renderConfigView()
 	}
 
 	// Header
@@ -306,9 +451,13 @@ func (m Model) View() string {
 	if m.newestFirst {
 		sortLabel = "newest first"
 	}
+	focusLabel := "stream"
+	if m.focus == focusPanel {
+		focusLabel = "panel"
+	}
 	help := HelpStyle.PaddingLeft(1).Render(
-		fmt.Sprintf("q quit | p pause | r refresh | s sort (%s) | t type | 1-%d repo | 0 clear%s",
-			sortLabel, len(m.cfg.Repos()), extra))
+		fmt.Sprintf("q quit | p pause | r refresh | c config | s sort (%s) | t type | ←/→ focus (%s) | 1-%d repo | 0 clear%s",
+			sortLabel, focusLabel, len(m.cfg.Repos()), extra))
 
 	// Build main content area
 	streamView := m.viewport.View()
@@ -327,24 +476,30 @@ func (m Model) View() string {
 	)
 }
 
-func (m Model) renderStatusPanel() string {
-	headerHeight := 4
-	footerHeight := 2
-	panelHeight := m.height - headerHeight - footerHeight
+// sortedRepoStatus returns repo statuses sorted with dirty/unpushed repos first.
+func sortedRepoStatus(statuses []gitstatus.RepoStatus) []gitstatus.RepoStatus {
+	sorted := make([]gitstatus.RepoStatus, len(statuses))
+	copy(sorted, statuses)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		iWeight := sorted[i].Uncommitted + sorted[i].Unpushed
+		jWeight := sorted[j].Uncommitted + sorted[j].Unpushed
+		return iWeight > jWeight
+	})
+	return sorted
+}
 
-	border := PanelBorderStyle.Width(statusPanelWidth).Height(panelHeight)
-
-	title := PanelTitleStyle.Render("Local Status")
+func (m *Model) rebuildPanelContent() {
 	var lines []string
-	lines = append(lines, title)
-	lines = append(lines, PanelDividerStyle.Render(strings.Repeat("─", statusPanelWidth-2)))
 
 	if len(m.repoStatus) == 0 {
-		lines = append(lines, PanelDimStyle.Render("  Scanning..."))
+		lines = append(lines, PanelDimStyle.Render("Scanning..."))
+		m.panelViewport.SetContent(strings.Join(lines, "\n"))
+		return
 	}
 
-	for _, s := range m.repoStatus {
-		// Repo name
+	sorted := sortedRepoStatus(m.repoStatus)
+
+	for _, s := range sorted {
 		short := s.Remote
 		if i := strings.LastIndex(s.Remote, "/"); i >= 0 {
 			short = s.Remote[i+1:]
@@ -360,8 +515,7 @@ func (m Model) renderStatusPanel() string {
 		lines = append(lines, PanelRepoStyle.Render(short))
 
 		// Branch
-		branchLine := fmt.Sprintf("  ᛘ %s", s.Branch)
-		lines = append(lines, PanelDimStyle.Render(branchLine))
+		lines = append(lines, PanelDimStyle.Render(fmt.Sprintf("  ᛘ %s", s.Branch)))
 
 		// Status indicators
 		if s.Uncommitted == 0 && s.Unpushed == 0 {
@@ -374,6 +528,15 @@ func (m Model) renderStatusPanel() string {
 			if s.Unpushed > 0 {
 				lines = append(lines, PanelWarnStyle.Render(
 					fmt.Sprintf("  ↑ %d unpushed", s.Unpushed)))
+				for _, c := range s.UnpushedCommits {
+					msg := c.Message
+					maxLen := statusPanelWidth - 8
+					if len(msg) > maxLen {
+						msg = msg[:maxLen-1] + "…"
+					}
+					lines = append(lines, PanelDimStyle.Render(
+						fmt.Sprintf("    %s %s", c.SHA, msg)))
+				}
 			}
 		}
 		if !s.HasUpstream {
@@ -403,8 +566,28 @@ func (m Model) renderStatusPanel() string {
 		lines = append(lines, "")
 	}
 
-	content := strings.Join(lines, "\n")
-	return border.Render(content)
+	m.panelViewport.SetContent(strings.Join(lines, "\n"))
+}
+
+func (m Model) renderStatusPanel() string {
+	headerHeight := 4
+	footerHeight := 2
+	panelHeight := m.height - headerHeight - footerHeight
+
+	// Title + divider outside the scrollable area
+	title := PanelTitleStyle.Render("Local Status")
+	focusIndicator := ""
+	if m.focus == focusPanel {
+		focusIndicator = " ◀"
+	}
+	titleLine := title + PanelDimStyle.Render(focusIndicator)
+	divider := PanelDividerStyle.Render(strings.Repeat("─", statusPanelWidth-2))
+
+	// The viewport content is scrollable
+	inner := lipgloss.JoinVertical(lipgloss.Left, titleLine, divider, m.panelViewport.View())
+
+	border := PanelBorderStyle.Width(statusPanelWidth).Height(panelHeight)
+	return border.Render(inner)
 }
 
 func relativeTime(t time.Time, now time.Time) string {

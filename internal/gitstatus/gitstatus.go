@@ -8,6 +8,14 @@ import (
 	"strings"
 )
 
+// LocalCommit represents an unpushed local commit.
+type LocalCommit struct {
+	SHA     string
+	Message string
+	Author  string
+	Date    string // ISO format
+}
+
 // CIStatus represents the latest CI workflow run status.
 type CIStatus struct {
 	Status     string // "completed", "in_progress", "queued"
@@ -17,14 +25,15 @@ type CIStatus struct {
 
 // RepoStatus holds the local git status for a repo.
 type RepoStatus struct {
-	Remote       string // owner/repo
-	Path         string // local path
-	Branch       string
-	Uncommitted  int  // staged + unstaged changed files
-	Unpushed     int  // commits ahead of upstream
-	HasUpstream  bool // whether the branch tracks a remote
-	CI           *CIStatus
-	Error        error
+	Remote          string // owner/repo
+	Path            string // local path
+	Branch          string
+	Uncommitted     int  // staged + unstaged changed files
+	Unpushed        int  // commits ahead of upstream
+	UnpushedCommits []LocalCommit
+	HasUpstream     bool // whether the branch tracks a remote
+	CI              *CIStatus
+	Error           error
 }
 
 // Check gathers the git status for a local repo at the given path.
@@ -49,20 +58,59 @@ func Check(remote, path string) RepoStatus {
 		s.Uncommitted = len(strings.Split(strings.TrimRight(status, "\n"), "\n"))
 	}
 
-	// Unpushed commits
-	count, err := gitOutput(path, "rev-list", "--count", "@{u}..HEAD")
+	// Unpushed commits — try upstream first, fall back to origin/main or origin/master
+	compareRef := "@{u}"
+	count, err := gitOutput(path, "rev-list", "--count", compareRef+"..HEAD")
 	if err != nil {
-		// No upstream configured
 		s.HasUpstream = false
-		return s
+		// Try origin/main, then origin/master as fallback
+		for _, fallback := range []string{"origin/main", "origin/master"} {
+			if _, verr := gitOutput(path, "rev-parse", "--verify", fallback); verr == nil {
+				compareRef = fallback
+				count, err = gitOutput(path, "rev-list", "--count", compareRef+"..HEAD")
+				break
+			}
+		}
+	} else {
+		s.HasUpstream = true
 	}
-	s.HasUpstream = true
-	s.Unpushed, _ = strconv.Atoi(count)
+
+	if err == nil {
+		s.Unpushed, _ = strconv.Atoi(count)
+	}
+
+	// Fetch unpushed commit details
+	if s.Unpushed > 0 {
+		s.UnpushedCommits = fetchUnpushedCommits(path, compareRef)
+	}
 
 	// CI status (non-blocking, best effort)
 	s.CI = fetchCI(remote)
 
 	return s
+}
+
+func fetchUnpushedCommits(path, compareRef string) []LocalCommit {
+	// Format: SHA|subject|author|date
+	out, err := gitOutput(path, "log", compareRef+"..HEAD", "--format=%H|%s|%an|%aI")
+	if err != nil || out == "" {
+		return nil
+	}
+	lines := strings.Split(out, "\n")
+	commits := make([]LocalCommit, 0, len(lines))
+	for _, line := range lines {
+		parts := strings.SplitN(line, "|", 4)
+		if len(parts) < 4 {
+			continue
+		}
+		commits = append(commits, LocalCommit{
+			SHA:     parts[0][:7], // short SHA
+			Message: parts[1],
+			Author:  parts[2],
+			Date:    parts[3],
+		})
+	}
+	return commits
 }
 
 func fetchCI(remote string) *CIStatus {

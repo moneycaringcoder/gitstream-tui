@@ -12,6 +12,7 @@ var (
 	ColorCreate  = lipgloss.Color("#22c55e") // green
 	ColorDelete  = lipgloss.Color("#ef4444") // red
 	ColorRelease = lipgloss.Color("#f97316") // orange
+	ColorLocal   = lipgloss.Color("#a78bfa") // light purple
 	ColorDim     = lipgloss.Color("#6b7280") // gray
 
 	// Layout styles
@@ -86,6 +87,8 @@ var (
 // EventColor returns the color for a given event type.
 func EventColor(eventType string) lipgloss.Color {
 	switch eventType {
+	case "LocalPushEvent":
+		return ColorLocal
 	case "PushEvent":
 		return ColorPush
 	case "PullRequestEvent":

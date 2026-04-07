@@ -131,6 +131,8 @@ func EnrichPushEvent(ev *Event) {
 // Label returns a short human-readable label for an event type.
 func (e *Event) Label() string {
 	switch e.Type {
+	case "LocalPushEvent":
+		return "LOCAL"
 	case "PushEvent":
 		return "PUSH"
 	case "PullRequestEvent":
@@ -174,6 +176,16 @@ func (e *Event) Label() string {
 func (e *Event) Detail() string {
 	p := e.Payload
 	switch e.Type {
+	case "LocalPushEvent":
+		msg := ""
+		if len(p.Commits) > 0 {
+			msg = p.Commits[0].Message
+		}
+		ref := p.Ref
+		if ref == "" {
+			ref = "unpushed"
+		}
+		return fmt.Sprintf("↑ %s — %s", ref, msg)
 	case "PushEvent":
 		ref := p.Ref
 		if len(ref) > 11 && ref[:11] == "refs/heads/" {
