@@ -48,8 +48,9 @@ var (
 	HelpStyle = lipgloss.NewStyle().
 			Foreground(ColorDim)
 
-	FlashStyle = lipgloss.NewStyle().
-			Background(lipgloss.Color("#1e3a5f"))
+	FlashMarker = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#22c55e")).
+			Bold(true)
 
 	// Status panel styles
 	PanelBorderStyle = lipgloss.NewStyle().

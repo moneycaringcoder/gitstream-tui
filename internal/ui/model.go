@@ -406,13 +406,12 @@ func (m *Model) skipEvent(de DisplayEvent) bool {
 
 func (m *Model) rebuildViewport() {
 	now := time.Now()
-	sw := m.streamWidth()
 	var lines []string
 	isFocused := m.focus == focusStream
 
 	addLine := func(de DisplayEvent) {
 		flash := !de.AddedAt.IsZero() && now.Before(de.AddedAt.Add(flashDuration))
-		line := renderEventLine(de.Event, now, flash, sw)
+		line := renderEventLine(de.Event, now, flash)
 		idx := len(lines)
 		if isFocused && idx == m.streamCursor {
 			line = CursorMarker.Render("▌") + " " + line
@@ -727,7 +726,7 @@ func osc8(url, text string) string {
 	return fmt.Sprintf("\x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\", url, text)
 }
 
-func renderEventLine(ev github.Event, now time.Time, flash bool, width int) string {
+func renderEventLine(ev github.Event, now time.Time, flash bool) string {
 	t := ev.CreatedAt.Local().Format("15:04:05")
 	rel := relativeTime(ev.CreatedAt, now)
 	timeStr := fmt.Sprintf("%s %s", t, rel)
@@ -752,7 +751,7 @@ func renderEventLine(ev github.Event, now time.Time, flash bool, width int) stri
 	)
 
 	if flash {
-		line = FlashStyle.Width(width).Render(line)
+		line = FlashMarker.Render("▐") + line
 	}
 
 	return line
