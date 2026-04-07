@@ -73,6 +73,8 @@ type Model struct {
 	repoStatus      []gitstatus.RepoStatus
 	seenLocalSHAs   map[string]bool
 	configUI        configState
+	debugLog        *DebugLog
+	debugUI         debugState
 }
 
 // Messages
@@ -80,7 +82,7 @@ type tickMsg struct{}
 type uiTickMsg struct{}
 type eventsMsg struct {
 	events []github.Event
-	err    error
+	errors []string
 }
 type discoveryMsg struct {
 	repos []discovery.LocalRepo
@@ -95,12 +97,13 @@ func NewModel(cfg *config.Config) Model {
 		seen:          make(map[string]bool),
 		seenLocalSHAs: make(map[string]bool),
 		events:        make([]DisplayEvent, 0, 256),
+		debugLog:      NewDebugLog(),
 	}
 }
 
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
-		pollEvents(m.cfg),
+		pollEvents(m.cfg, m.debugLog, true),
 		tickCmd(time.Duration(m.cfg.Interval)*time.Second),
 		uiTickCmd(),
 		discoverRepos(m.cfg),
@@ -108,6 +111,20 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Debug overlay takes over input when active
+	if m.debugUI.active {
+		if msg, ok := msg.(tea.KeyMsg); ok {
+			switch msg.String() {
+			case "D", "esc":
+				m.debugUI.active = false
+				return m, nil
+			case "q", "ctrl+c":
+				return m, tea.Quit
+			}
+			return m, nil
+		}
+	}
+
 	// Config editor takes over input when active
 	if m.configUI.active {
 		if msg, ok := msg.(tea.KeyMsg); ok {
@@ -124,10 +141,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "c":
 			m.configUI = configState{active: true}
 			return m, nil
+		case "D":
+			m.debugUI.active = !m.debugUI.active
+			return m, nil
 		case "p":
 			m.paused = !m.paused
 		case "r":
-			return m, pollEvents(m.cfg)
+			return m, pollEvents(m.cfg, m.debugLog, false)
 		case "1", "2", "3", "4", "5", "6", "7", "8", "9":
 			idx := int(msg.String()[0]-'0') - 1
 			if idx < len(m.cfg.Repos()) {
@@ -255,9 +275,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.rebuildPanelContent()
 
 	case eventsMsg:
-		if msg.err != nil {
-			m.err = msg.err
-		} else {
+		for _, e := range msg.errors {
+			m.debugLog.Error("%s", e)
+		}
+		{
 			now := time.Now()
 			recentThreshold := time.Duration(m.cfg.Interval) * time.Second * 2
 			newCount := 0
@@ -344,7 +365,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		cmds := []tea.Cmd{tickCmd(time.Duration(m.cfg.Interval) * time.Second)}
 		if !m.paused {
-			cmds = append(cmds, pollEvents(m.cfg))
+			cmds = append(cmds, pollEvents(m.cfg, m.debugLog, false))
 			if len(m.localRepos) > 0 {
 				cmds = append(cmds, pollGitStatus(m.localRepos))
 			}
@@ -513,6 +534,10 @@ func (m Model) View() string {
 		return "Initializing..."
 	}
 
+	if m.debugUI.active {
+		return m.renderDebugView()
+	}
+
 	if m.configUI.active {
 		return m.renderConfigView()
 	}
@@ -550,7 +575,7 @@ func (m Model) View() string {
 		focusLabel = "panel"
 	}
 	help := HelpStyle.PaddingLeft(1).Render(
-		fmt.Sprintf("q quit | p pause | r refresh | c config | s sort (%s) | t type | ←/→ focus (%s) | 1-%d repo | 0 clear%s",
+		fmt.Sprintf("q quit | p pause | r refresh | c config | D debug | s sort (%s) | t type | ←/→ focus (%s) | 1-%d repo | 0 clear%s",
 			sortLabel, focusLabel, len(m.cfg.Repos()), extra))
 
 	// Build main content area with focus badges
@@ -751,48 +776,87 @@ func renderEventLine(ev github.Event, now time.Time, flash bool) string {
 	return line
 }
 
-func pollEvents(cfg *config.Config) tea.Cmd {
+func pollEvents(cfg *config.Config, debugLog *DebugLog, initial bool) tea.Cmd {
 	return func() tea.Msg {
 		type result struct {
 			events []github.Event
+			errs   []string
 		}
 
+		repos := cfg.Repos()
 		var wg sync.WaitGroup
-		results := make([]result, len(cfg.Repos()))
+		results := make([]result, len(repos))
 
-		// Fetch all repos in parallel
-		for idx, repo := range cfg.Repos() {
+		// How many pages to fetch: 2 on initial load for more history, 1 after
+		pages := 1
+		if initial {
+			pages = 2
+		}
+
+		for idx, repo := range repos {
 			wg.Add(1)
 			go func(i int, r string) {
 				defer wg.Done()
-				events, err := github.FetchEvents(r, 20)
-				if err != nil {
-					return
+				var allEvents []github.Event
+				var errs []string
+
+				for page := 1; page <= pages; page++ {
+					events, err := github.FetchEvents(r, 30, page)
+					if err != nil {
+						// Retry once after a short pause
+						time.Sleep(500 * time.Millisecond)
+						events, err = github.FetchEvents(r, 30, page)
+						if err != nil {
+							errs = append(errs, fmt.Sprintf("%s page %d: %v", r, page, err))
+							debugLog.RecordFetch(r, false, 0)
+							continue
+						}
+					}
+					allEvents = append(allEvents, events...)
+					debugLog.RecordFetch(r, true, len(events))
+					debugLog.Info("Fetched %d events from %s (page %d)", len(events), r, page)
+				}
+
+				// Deduplicate by event ID across pages
+				seen := make(map[string]bool)
+				var deduped []github.Event
+				for _, ev := range allEvents {
+					if !seen[ev.ID] {
+						seen[ev.ID] = true
+						deduped = append(deduped, ev)
+					}
+				}
+
+				// Limit to 50 events per repo
+				if len(deduped) > 50 {
+					deduped = deduped[:50]
 				}
 
 				// Enrich push events in parallel
 				var ewg sync.WaitGroup
-				for j := range events {
-					if events[j].Type == "PushEvent" {
+				for j := range deduped {
+					if deduped[j].Type == "PushEvent" {
 						ewg.Add(1)
 						go func(e *github.Event) {
 							defer ewg.Done()
 							github.EnrichPushEvent(e)
-						}(&events[j])
+						}(&deduped[j])
 					}
 				}
 				ewg.Wait()
 
-				results[i] = result{events: events}
+				results[i] = result{events: deduped, errs: errs}
 			}(idx, repo)
 		}
 		wg.Wait()
 
 		var all []github.Event
+		var allErrors []string
 		for _, r := range results {
 			all = append(all, r.events...)
+			allErrors = append(allErrors, r.errs...)
 		}
-		return eventsMsg{events: all}
+		return eventsMsg{events: all, errors: allErrors}
 	}
 }
 

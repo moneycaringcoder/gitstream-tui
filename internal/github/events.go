@@ -92,11 +92,16 @@ func FetchCompare(repo, base, head string) (*CompareResult, error) {
 }
 
 // FetchEvents fetches recent events for a repo using the gh CLI.
-func FetchEvents(repo string, limit int) ([]Event, error) {
-	cmd := exec.Command("gh", "api", fmt.Sprintf("repos/%s/events", repo), "--cache", "0s")
+// page is 1-indexed; each page returns up to 30 events from the API.
+func FetchEvents(repo string, limit int, page int) ([]Event, error) {
+	if page < 1 {
+		page = 1
+	}
+	url := fmt.Sprintf("repos/%s/events?per_page=30&page=%d", repo, page)
+	cmd := exec.Command("gh", "api", url, "--cache", "0s")
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("gh api failed for %s: %w", repo, err)
+		return nil, fmt.Errorf("gh api failed for %s (page %d): %w", repo, page, err)
 	}
 
 	var events []Event
