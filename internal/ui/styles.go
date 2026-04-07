@@ -49,6 +49,35 @@ var (
 
 	FlashStyle = lipgloss.NewStyle().
 			Background(lipgloss.Color("#1e3a5f"))
+
+	// Status panel styles
+	PanelBorderStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("#3b3b3b")).
+				Padding(0, 1)
+
+	PanelTitleStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#ffffff"))
+
+	PanelDividerStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#3b3b3b"))
+
+	PanelRepoStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#3b82f6"))
+
+	PanelDimStyle = lipgloss.NewStyle().
+			Foreground(ColorDim)
+
+	PanelCleanStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#22c55e"))
+
+	PanelDirtyStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#eab308"))
+
+	PanelWarnStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#f97316"))
 )
 
 // EventColor returns the color for a given event type.

@@ -11,7 +11,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/moneycaringcoder/gitstream-tui/internal/config"
+	"github.com/moneycaringcoder/gitstream-tui/internal/discovery"
 	"github.com/moneycaringcoder/gitstream-tui/internal/github"
+	"github.com/moneycaringcoder/gitstream-tui/internal/gitstatus"
 )
 
 const flashDuration = 3 * time.Second
@@ -21,6 +23,8 @@ type DisplayEvent struct {
 	Event   github.Event
 	AddedAt time.Time
 }
+
+const statusPanelWidth = 32
 
 // Model is the main Bubble Tea model.
 type Model struct {
@@ -37,6 +41,8 @@ type Model struct {
 	filter      string // filter by repo name
 	newestFirst bool   // sort order: true = newest on top
 	firstPoll   bool   // true after first poll completes
+	localRepos  []discovery.LocalRepo
+	repoStatus  []gitstatus.RepoStatus
 }
 
 // Messages
@@ -45,6 +51,12 @@ type uiTickMsg struct{}
 type eventsMsg struct {
 	events []github.Event
 	err    error
+}
+type discoveryMsg struct {
+	repos []discovery.LocalRepo
+}
+type gitStatusMsg struct {
+	statuses []gitstatus.RepoStatus
 }
 
 func NewModel(cfg *config.Config) Model {
@@ -60,6 +72,7 @@ func (m Model) Init() tea.Cmd {
 		pollEvents(m.cfg),
 		tickCmd(time.Duration(m.cfg.Interval)*time.Second),
 		uiTickCmd(),
+		discoverRepos(m.cfg),
 	)
 }
 
@@ -75,8 +88,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, pollEvents(m.cfg)
 		case "1", "2", "3", "4", "5", "6", "7", "8", "9":
 			idx := int(msg.String()[0]-'0') - 1
-			if idx < len(m.cfg.Repos) {
-				repo := m.cfg.Repos[idx]
+			if idx < len(m.cfg.Repos()) {
+				repo := m.cfg.Repos()[idx]
 				short := repo
 				if i := strings.LastIndex(repo, "/"); i >= 0 {
 					short = repo[i+1:]
@@ -101,12 +114,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		headerHeight := 4
 		footerHeight := 2
+		streamWidth := m.streamWidth()
 		if !m.ready {
-			m.viewport = viewport.New(msg.Width, msg.Height-headerHeight-footerHeight)
+			m.viewport = viewport.New(streamWidth, msg.Height-headerHeight-footerHeight)
 			m.viewport.YPosition = headerHeight
 			m.ready = true
 		} else {
-			m.viewport.Width = msg.Width
+			m.viewport.Width = streamWidth
 			m.viewport.Height = msg.Height - headerHeight - footerHeight
 		}
 		m.rebuildViewport()
@@ -141,6 +155,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.lastPoll = time.Now()
 
+	case discoveryMsg:
+		m.localRepos = msg.repos
+		if len(m.localRepos) > 0 {
+			m.viewport.Width = m.streamWidth()
+			m.rebuildViewport()
+			return m, pollGitStatus(m.localRepos)
+		}
+
+	case gitStatusMsg:
+		m.repoStatus = msg.statuses
+
 	case uiTickMsg:
 		m.rebuildViewport()
 		return m, uiTickCmd()
@@ -149,6 +174,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds := []tea.Cmd{tickCmd(time.Duration(m.cfg.Interval) * time.Second)}
 		if !m.paused {
 			cmds = append(cmds, pollEvents(m.cfg))
+			if len(m.localRepos) > 0 {
+				cmds = append(cmds, pollGitStatus(m.localRepos))
+			}
 		}
 		return m, tea.Batch(cmds...)
 	}
@@ -158,8 +186,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m *Model) streamWidth() int {
+	if len(m.localRepos) > 0 {
+		w := m.width - statusPanelWidth - 3 // 3 for border + gap
+		if w < 40 {
+			return m.width // too narrow, skip panel
+		}
+		return w
+	}
+	return m.width
+}
+
+func (m *Model) hasPanel() bool {
+	return len(m.localRepos) > 0 && m.width-statusPanelWidth-3 >= 40
+}
+
 func (m *Model) rebuildViewport() {
 	now := time.Now()
+	sw := m.streamWidth()
 	var lines []string
 	if m.newestFirst {
 		for i := len(m.events) - 1; i >= 0; i-- {
@@ -168,7 +212,7 @@ func (m *Model) rebuildViewport() {
 				continue
 			}
 			flash := !de.AddedAt.IsZero() && now.Before(de.AddedAt.Add(flashDuration))
-			lines = append(lines, renderEventLine(de.Event, now, flash, m.width))
+			lines = append(lines, renderEventLine(de.Event, now, flash, sw))
 		}
 	} else {
 		for _, de := range m.events {
@@ -176,7 +220,7 @@ func (m *Model) rebuildViewport() {
 				continue
 			}
 			flash := !de.AddedAt.IsZero() && now.Before(de.AddedAt.Add(flashDuration))
-			lines = append(lines, renderEventLine(de.Event, now, flash, m.width))
+			lines = append(lines, renderEventLine(de.Event, now, flash, sw))
 		}
 	}
 	m.viewport.SetContent(strings.Join(lines, "\n"))
@@ -189,7 +233,7 @@ func (m Model) View() string {
 
 	// Header
 	title := TitleStyle.Render("gitstream")
-	repoList := SubtitleStyle.Render(fmt.Sprintf("Watching: %s", strings.Join(m.cfg.Repos, ", ")))
+	repoList := SubtitleStyle.Render(fmt.Sprintf("Watching: %s", strings.Join(m.cfg.Repos(), ", ")))
 
 	status := ""
 	if m.paused {
@@ -212,15 +256,83 @@ func (m Model) View() string {
 	}
 	help := HelpStyle.PaddingLeft(1).Render(
 		fmt.Sprintf("q quit | p pause | r refresh | s sort (%s) | 1-%d filter | 0 clear%s",
-			sortLabel, len(m.cfg.Repos), extra))
+			sortLabel, len(m.cfg.Repos()), extra))
+
+	// Build main content area
+	streamView := m.viewport.View()
+
+	if m.hasPanel() {
+		panel := m.renderStatusPanel()
+		streamView = lipgloss.JoinHorizontal(lipgloss.Top, streamView, " ", panel)
+	}
 
 	// Compose
 	return lipgloss.JoinVertical(lipgloss.Left,
 		header,
-		m.viewport.View(),
+		streamView,
 		"",
 		help,
 	)
+}
+
+func (m Model) renderStatusPanel() string {
+	headerHeight := 4
+	footerHeight := 2
+	panelHeight := m.height - headerHeight - footerHeight
+
+	border := PanelBorderStyle.Width(statusPanelWidth).Height(panelHeight)
+
+	title := PanelTitleStyle.Render("Local Status")
+	var lines []string
+	lines = append(lines, title)
+	lines = append(lines, PanelDividerStyle.Render(strings.Repeat("─", statusPanelWidth-2)))
+
+	if len(m.repoStatus) == 0 {
+		lines = append(lines, PanelDimStyle.Render("  Scanning..."))
+	}
+
+	for _, s := range m.repoStatus {
+		// Repo name
+		short := s.Remote
+		if i := strings.LastIndex(s.Remote, "/"); i >= 0 {
+			short = s.Remote[i+1:]
+		}
+
+		if s.Error != nil {
+			lines = append(lines, PanelRepoStyle.Render(short))
+			lines = append(lines, PanelDimStyle.Render("  error"))
+			lines = append(lines, "")
+			continue
+		}
+
+		lines = append(lines, PanelRepoStyle.Render(short))
+
+		// Branch
+		branchLine := fmt.Sprintf("  ᛘ %s", s.Branch)
+		lines = append(lines, PanelDimStyle.Render(branchLine))
+
+		// Status indicators
+		if s.Uncommitted == 0 && s.Unpushed == 0 {
+			lines = append(lines, PanelCleanStyle.Render("  ✓ clean"))
+		} else {
+			if s.Uncommitted > 0 {
+				lines = append(lines, PanelDirtyStyle.Render(
+					fmt.Sprintf("  ● %d uncommitted", s.Uncommitted)))
+			}
+			if s.Unpushed > 0 {
+				lines = append(lines, PanelWarnStyle.Render(
+					fmt.Sprintf("  ↑ %d unpushed", s.Unpushed)))
+			}
+		}
+		if !s.HasUpstream {
+			lines = append(lines, PanelDimStyle.Render("  ⚠ no upstream"))
+		}
+
+		lines = append(lines, "")
+	}
+
+	content := strings.Join(lines, "\n")
+	return border.Render(content)
 }
 
 func relativeTime(t time.Time, now time.Time) string {
@@ -271,10 +383,10 @@ func pollEvents(cfg *config.Config) tea.Cmd {
 		}
 
 		var wg sync.WaitGroup
-		results := make([]result, len(cfg.Repos))
+		results := make([]result, len(cfg.Repos()))
 
 		// Fetch all repos in parallel
-		for idx, repo := range cfg.Repos {
+		for idx, repo := range cfg.Repos() {
 			wg.Add(1)
 			go func(i int, r string) {
 				defer wg.Done()
@@ -319,4 +431,27 @@ func uiTickCmd() tea.Cmd {
 	return tea.Tick(time.Second, func(time.Time) tea.Msg {
 		return uiTickMsg{}
 	})
+}
+
+func discoverRepos(cfg *config.Config) tea.Cmd {
+	return func() tea.Msg {
+		repos := discovery.Discover(cfg.Repos(), cfg.ExplicitPaths())
+		return discoveryMsg{repos: repos}
+	}
+}
+
+func pollGitStatus(repos []discovery.LocalRepo) tea.Cmd {
+	return func() tea.Msg {
+		var wg sync.WaitGroup
+		statuses := make([]gitstatus.RepoStatus, len(repos))
+		for i, r := range repos {
+			wg.Add(1)
+			go func(idx int, repo discovery.LocalRepo) {
+				defer wg.Done()
+				statuses[idx] = gitstatus.Check(repo.Remote, repo.Path)
+			}(i, r)
+		}
+		wg.Wait()
+		return gitStatusMsg{statuses: statuses}
+	}
 }
