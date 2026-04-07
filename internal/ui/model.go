@@ -243,13 +243,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.ready {
 			m.viewport = viewport.New(streamWidth, contentHeight)
 			m.viewport.YPosition = headerHeight
-			m.panelViewport = viewport.New(statusPanelWidth-4, contentHeight-4) // border + title/divider
+			m.panelViewport = viewport.New(statusPanelWidth, contentHeight)
 			m.ready = true
 		} else {
 			m.viewport.Width = streamWidth
 			m.viewport.Height = contentHeight
-			m.panelViewport.Width = statusPanelWidth - 4
-			m.panelViewport.Height = contentHeight - 4
+			m.panelViewport.Width = statusPanelWidth
+			m.panelViewport.Height = contentHeight
 		}
 		m.rebuildViewport()
 		m.rebuildPanelContent()
@@ -363,7 +363,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) streamWidth() int {
 	if len(m.localRepos) > 0 {
-		w := m.width - statusPanelWidth - 3 // 3 for border + gap
+		w := m.width - statusPanelWidth - 1 // 1 for divider
 		if w < 40 {
 			return m.width // too narrow, skip panel
 		}
@@ -567,7 +567,12 @@ func (m Model) View() string {
 		}
 		panel := m.renderStatusPanel()
 		panelWithBadge := lipgloss.JoinVertical(lipgloss.Left, panelBadge, panel)
-		streamView = lipgloss.JoinHorizontal(lipgloss.Top, streamView, " ", panelWithBadge)
+
+		// Build a full-height vertical divider
+		dividerHeight := m.height - 4 - 2 // header + footer
+		dividerCol := DividerStyle.Render(strings.Repeat("│\n", dividerHeight))
+
+		streamView = lipgloss.JoinHorizontal(lipgloss.Top, streamView, dividerCol, panelWithBadge)
 	}
 
 	// Compose
@@ -687,20 +692,7 @@ func (m *Model) rebuildPanelContent() {
 }
 
 func (m Model) renderStatusPanel() string {
-	headerHeight := 4
-	footerHeight := 2
-	badgeHeight := 1
-	panelHeight := m.height - headerHeight - footerHeight - badgeHeight
-
-	// Title + divider outside the scrollable area
-	titleLine := PanelTitleStyle.Render("Local Status")
-	divider := PanelDividerStyle.Render(strings.Repeat("─", statusPanelWidth-2))
-
-	// The viewport content is scrollable
-	inner := lipgloss.JoinVertical(lipgloss.Left, titleLine, divider, m.panelViewport.View())
-
-	border := PanelBorderStyle.Width(statusPanelWidth).Height(panelHeight)
-	return border.Render(inner)
+	return m.panelViewport.View()
 }
 
 func relativeTime(t time.Time, now time.Time) string {

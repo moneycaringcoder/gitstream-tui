@@ -84,6 +84,9 @@ var (
 	PanelCIFailStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#ef4444"))
 
+	DividerStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#3b3b3b"))
+
 	CursorMarker = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#3b82f6")).
 			Bold(true)
