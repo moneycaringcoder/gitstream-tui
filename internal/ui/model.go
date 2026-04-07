@@ -18,6 +18,19 @@ import (
 
 const flashDuration = 3 * time.Second
 
+// typeFilters is the cycle order for the 't' key.
+var typeFilters = []string{
+	"", // all
+	"PushEvent",
+	"PullRequestEvent",
+	"PullRequestReviewEvent",
+	"IssueCommentEvent",
+	"IssuesEvent",
+	"CreateEvent",
+	"DeleteEvent",
+	"ReleaseEvent",
+}
+
 // DisplayEvent holds a parsed event for display.
 type DisplayEvent struct {
 	Event   github.Event
@@ -39,6 +52,7 @@ type Model struct {
 	lastPoll    time.Time
 	paused      bool
 	filter      string // filter by repo name
+	typeFilter  string // filter by event type label
 	newestFirst bool   // sort order: true = newest on top
 	firstPoll   bool   // true after first poll completes
 	localRepos  []discovery.LocalRepo
@@ -103,9 +117,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "0":
 			m.filter = ""
+			m.typeFilter = ""
 			m.rebuildViewport()
 		case "s":
 			m.newestFirst = !m.newestFirst
+			m.rebuildViewport()
+		case "t":
+			// Cycle through type filters
+			cur := 0
+			for i, t := range typeFilters {
+				if t == m.typeFilter {
+					cur = i
+					break
+				}
+			}
+			m.typeFilter = typeFilters[(cur+1)%len(typeFilters)]
+			m.rebuildViewport()
+		case "T":
+			// Cycle backward
+			cur := 0
+			for i, t := range typeFilters {
+				if t == m.typeFilter {
+					cur = i
+					break
+				}
+			}
+			m.typeFilter = typeFilters[(cur-1+len(typeFilters))%len(typeFilters)]
 			m.rebuildViewport()
 		}
 
@@ -201,6 +238,16 @@ func (m *Model) hasPanel() bool {
 	return len(m.localRepos) > 0 && m.width-statusPanelWidth-3 >= 40
 }
 
+func (m *Model) skipEvent(de DisplayEvent) bool {
+	if m.filter != "" && de.Event.ShortRepo() != m.filter {
+		return true
+	}
+	if m.typeFilter != "" && de.Event.Type != m.typeFilter {
+		return true
+	}
+	return false
+}
+
 func (m *Model) rebuildViewport() {
 	now := time.Now()
 	sw := m.streamWidth()
@@ -208,7 +255,7 @@ func (m *Model) rebuildViewport() {
 	if m.newestFirst {
 		for i := len(m.events) - 1; i >= 0; i-- {
 			de := m.events[i]
-			if m.filter != "" && de.Event.ShortRepo() != m.filter {
+			if m.skipEvent(de) {
 				continue
 			}
 			flash := !de.AddedAt.IsZero() && now.Before(de.AddedAt.Add(flashDuration))
@@ -216,7 +263,7 @@ func (m *Model) rebuildViewport() {
 		}
 	} else {
 		for _, de := range m.events {
-			if m.filter != "" && de.Event.ShortRepo() != m.filter {
+			if m.skipEvent(de) {
 				continue
 			}
 			flash := !de.AddedAt.IsZero() && now.Before(de.AddedAt.Add(flashDuration))
@@ -248,14 +295,19 @@ func (m Model) View() string {
 	// Footer
 	extra := ""
 	if m.filter != "" {
-		extra += fmt.Sprintf(" | filtered: %s", m.filter)
+		extra += fmt.Sprintf(" | repo: %s", m.filter)
+	}
+	if m.typeFilter != "" {
+		// Show the label for the active type filter
+		ev := github.Event{Type: m.typeFilter}
+		extra += fmt.Sprintf(" | type: %s", ev.Label())
 	}
 	sortLabel := "oldest first"
 	if m.newestFirst {
 		sortLabel = "newest first"
 	}
 	help := HelpStyle.PaddingLeft(1).Render(
-		fmt.Sprintf("q quit | p pause | r refresh | s sort (%s) | 1-%d filter | 0 clear%s",
+		fmt.Sprintf("q quit | p pause | r refresh | s sort (%s) | t type | 1-%d repo | 0 clear%s",
 			sortLabel, len(m.cfg.Repos()), extra))
 
 	// Build main content area
@@ -328,6 +380,26 @@ func (m Model) renderStatusPanel() string {
 			lines = append(lines, PanelDimStyle.Render("  ⚠ no upstream"))
 		}
 
+		// CI status
+		if s.CI != nil {
+			var ciLine string
+			switch s.CI.Conclusion {
+			case "success":
+				ciLine = PanelCleanStyle.Render("  ✓ CI passed")
+			case "failure":
+				ciLine = PanelCIFailStyle.Render("  ✗ CI failed")
+			case "cancelled":
+				ciLine = PanelDimStyle.Render("  ○ CI cancelled")
+			default:
+				if s.CI.Status == "in_progress" {
+					ciLine = PanelWarnStyle.Render("  ◌ CI running")
+				} else {
+					ciLine = PanelDimStyle.Render(fmt.Sprintf("  ○ CI %s", s.CI.Conclusion))
+				}
+			}
+			lines = append(lines, ciLine)
+		}
+
 		lines = append(lines, "")
 	}
 
@@ -352,6 +424,14 @@ func relativeTime(t time.Time, now time.Time) string {
 	}
 }
 
+// osc8 wraps text in an OSC8 hyperlink escape sequence.
+func osc8(url, text string) string {
+	if url == "" {
+		return text
+	}
+	return fmt.Sprintf("\x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\", url, text)
+}
+
 func renderEventLine(ev github.Event, now time.Time, flash bool, width int) string {
 	t := ev.CreatedAt.Local().Format("15:04:05")
 	rel := relativeTime(ev.CreatedAt, now)
@@ -360,13 +440,20 @@ func renderEventLine(ev github.Event, now time.Time, flash bool, width int) stri
 	detail := ev.Detail()
 	actor := ev.Actor.Login
 	repo := ev.ShortRepo()
+	url := ev.URL()
+
+	// Wrap detail in a clickable hyperlink
+	detailRendered := DetailStyle.Render(detail)
+	if url != "" {
+		detailRendered = osc8(url, detailRendered)
+	}
 
 	line := fmt.Sprintf("%s  %s %s %s %s",
 		TimeStyle.Render(timeStr),
 		RepoStyle.Render(repo),
 		LabelStyle(ev.Type).Render(label),
 		ActorStyle.Render(actor),
-		DetailStyle.Render(detail),
+		detailRendered,
 	)
 
 	if flash {

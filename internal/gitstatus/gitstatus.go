@@ -1,10 +1,19 @@
 package gitstatus
 
 import (
+	"encoding/json"
+	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
 )
+
+// CIStatus represents the latest CI workflow run status.
+type CIStatus struct {
+	Status     string // "completed", "in_progress", "queued"
+	Conclusion string // "success", "failure", "cancelled", etc.
+	Name       string // workflow name
+}
 
 // RepoStatus holds the local git status for a repo.
 type RepoStatus struct {
@@ -14,6 +23,7 @@ type RepoStatus struct {
 	Uncommitted  int  // staged + unstaged changed files
 	Unpushed     int  // commits ahead of upstream
 	HasUpstream  bool // whether the branch tracks a remote
+	CI           *CIStatus
 	Error        error
 }
 
@@ -49,7 +59,29 @@ func Check(remote, path string) RepoStatus {
 	s.HasUpstream = true
 	s.Unpushed, _ = strconv.Atoi(count)
 
+	// CI status (non-blocking, best effort)
+	s.CI = fetchCI(remote)
+
 	return s
+}
+
+func fetchCI(remote string) *CIStatus {
+	cmd := exec.Command("gh", "api",
+		fmt.Sprintf("repos/%s/actions/runs?per_page=1&status=completed", remote),
+		"--jq", `.workflow_runs[0] | {status, conclusion, name}`)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(string(out))
+	if trimmed == "" || trimmed == "null" {
+		return nil
+	}
+	var ci CIStatus
+	if err := json.Unmarshal([]byte(trimmed), &ci); err != nil {
+		return nil
+	}
+	return &ci
 }
 
 func gitOutput(dir string, args ...string) (string, error) {

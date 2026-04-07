@@ -226,6 +226,38 @@ func (e *Event) Detail() string {
 	return ""
 }
 
+// URL returns a GitHub URL for the event, if applicable.
+func (e *Event) URL() string {
+	base := "https://github.com/" + e.Repo.Name
+	p := e.Payload
+	switch e.Type {
+	case "PushEvent":
+		if p.Head != "" {
+			return base + "/commit/" + p.Head
+		}
+	case "PullRequestEvent", "PullRequestReviewEvent", "PullRequestReviewCommentEvent":
+		if p.PullRequest != nil {
+			return fmt.Sprintf("%s/pull/%d", base, p.PullRequest.Number)
+		}
+	case "IssueCommentEvent", "IssuesEvent":
+		if p.Issue != nil {
+			return fmt.Sprintf("%s/issues/%d", base, p.Issue.Number)
+		}
+	case "ReleaseEvent":
+		if p.Release != nil {
+			return fmt.Sprintf("%s/releases/tag/%s", base, p.Release.TagName)
+		}
+	case "CreateEvent":
+		if p.RefType == "branch" && p.Ref != "" {
+			return fmt.Sprintf("%s/tree/%s", base, p.Ref)
+		}
+		if p.RefType == "tag" && p.Ref != "" {
+			return fmt.Sprintf("%s/releases/tag/%s", base, p.Ref)
+		}
+	}
+	return base
+}
+
 // ShortRepo returns just the repo name without the owner prefix.
 func (e *Event) ShortRepo() string {
 	name := e.Repo.Name

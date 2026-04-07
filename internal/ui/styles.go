@@ -78,6 +78,9 @@ var (
 
 	PanelWarnStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#f97316"))
+
+	PanelCIFailStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#ef4444"))
 )
 
 // EventColor returns the color for a given event type.
