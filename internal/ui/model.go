@@ -2,6 +2,8 @@ package ui
 
 import (
 	"fmt"
+	"os/exec"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -67,6 +69,7 @@ type Model struct {
 	firstPoll     bool   // true after first poll completes
 	streamCursor    int // cursor row index in filtered events
 	streamLineCount int // total visible lines in stream
+	streamEvents    []DisplayEvent // filtered events in display order (parallel to lines)
 	panelCursor     int // cursor row index in panel content
 	panelLineCount  int // total visible lines in panel
 	localRepos      []discovery.LocalRepo
@@ -258,26 +261,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.rebuildPanelContent()
 			m.ensureCursorVisible()
 			return m, nil
+		case "enter":
+			if m.focus == focusStream {
+				if de := m.cursorEvent(); de != nil {
+					url := de.Event.URL()
+					if url != "" {
+						openURL(url)
+					}
+				}
+			}
+			return m, nil
 		}
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		headerHeight := 4
-		footerHeight := 2
-		badgeHeight := 1
-		contentHeight := msg.Height - headerHeight - footerHeight - badgeHeight
+		ch := m.contentHeight()
 		streamWidth := m.streamWidth()
 		if !m.ready {
-			m.viewport = viewport.New(streamWidth, contentHeight)
-			m.viewport.YPosition = headerHeight
-			m.panelViewport = viewport.New(statusPanelWidth, contentHeight)
+			m.viewport = viewport.New(streamWidth, ch)
+			m.viewport.YPosition = 0
+			m.panelViewport = viewport.New(statusPanelWidth, ch)
 			m.ready = true
 		} else {
 			m.viewport.Width = streamWidth
-			m.viewport.Height = contentHeight
+			m.viewport.Height = ch
 			m.panelViewport.Width = statusPanelWidth
-			m.panelViewport.Height = contentHeight
+			m.panelViewport.Height = ch
 		}
 		m.rebuildViewport()
 		m.rebuildPanelContent()
@@ -408,6 +418,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// contentHeight returns the viewport height after subtracting chrome.
+// header(4) + badge(1) + detailBar(3) + help(1) = 9 lines of chrome.
+func (m *Model) contentHeight() int {
+	h := m.height - 9
+	if h < 3 {
+		h = 3
+	}
+	return h
+}
+
 func (m *Model) streamWidth() int {
 	if len(m.localRepos) > 0 {
 		w := m.width - statusPanelWidth - 1 // 1 for divider
@@ -464,6 +484,7 @@ func (m *Model) skipEvent(de DisplayEvent) bool {
 func (m *Model) rebuildViewport() {
 	now := time.Now()
 	var lines []string
+	var displayEvents []DisplayEvent
 	isFocused := m.focus == focusStream
 
 	addLine := func(de DisplayEvent) {
@@ -478,6 +499,7 @@ func (m *Model) rebuildViewport() {
 			line = "  " + line
 		}
 		lines = append(lines, line)
+		displayEvents = append(displayEvents, de)
 	}
 
 	if m.newestFirst {
@@ -497,10 +519,19 @@ func (m *Model) rebuildViewport() {
 		}
 	}
 	m.streamLineCount = len(lines)
+	m.streamEvents = displayEvents
 	if m.streamCursor >= m.streamLineCount && m.streamLineCount > 0 {
 		m.streamCursor = m.streamLineCount - 1
 	}
 	m.viewport.SetContent(strings.Join(lines, "\n"))
+}
+
+// cursorEvent returns the DisplayEvent under the stream cursor, if any.
+func (m *Model) cursorEvent() *DisplayEvent {
+	if m.streamCursor >= 0 && m.streamCursor < len(m.streamEvents) {
+		return &m.streamEvents[m.streamCursor]
+	}
+	return nil
 }
 
 func (m Model) updateConfig(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -582,13 +613,42 @@ func (m Model) View() string {
 	title := TitleStyle.Render("gitstream")
 	repoList := SubtitleStyle.Render(fmt.Sprintf("Watching: %s", strings.Join(m.cfg.Repos(), ", ")))
 
-	status := ""
+	// Status line: poll info + health dots + rate limit (single line)
+	var statusParts []string
 	if m.paused {
-		status = SubtitleStyle.Copy().Foreground(lipgloss.Color("#eab308")).Render("[PAUSED]")
+		statusParts = append(statusParts, lipgloss.NewStyle().Foreground(lipgloss.Color("#eab308")).Render("[PAUSED]"))
 	} else if !m.lastPoll.IsZero() {
 		ago := time.Since(m.lastPoll).Truncate(time.Second)
-		status = SubtitleStyle.Render(fmt.Sprintf("Last poll: %s ago", ago))
+		statusParts = append(statusParts, fmt.Sprintf("Poll %s ago", ago))
 	}
+	stats := m.debugLog.GetStats()
+	for _, repo := range m.cfg.Repos() {
+		short := repo
+		if i := strings.LastIndex(repo, "/"); i >= 0 {
+			short = repo[i+1:]
+		}
+		dot := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Render("○")
+		if h, ok := stats.RepoHealth[repo]; ok {
+			if h.LastSuccess {
+				dot = lipgloss.NewStyle().Foreground(lipgloss.Color("#22c55e")).Render("●")
+			} else {
+				dot = lipgloss.NewStyle().Foreground(lipgloss.Color("#ef4444")).Render("●")
+			}
+		}
+		statusParts = append(statusParts, dot+" "+short)
+	}
+	if stats.RateLimit > 0 {
+		ratePct := float64(stats.RateRemain) / float64(stats.RateLimit) * 100
+		rateColor := lipgloss.Color("#22c55e")
+		if ratePct < 20 {
+			rateColor = lipgloss.Color("#ef4444")
+		} else if ratePct < 50 {
+			rateColor = lipgloss.Color("#eab308")
+		}
+		statusParts = append(statusParts, lipgloss.NewStyle().Foreground(rateColor).Render(
+			fmt.Sprintf("API %d/%d", stats.RateRemain, stats.RateLimit)))
+	}
+	status := SubtitleStyle.Render(strings.Join(statusParts, "  "))
 
 	header := lipgloss.JoinVertical(lipgloss.Left, title, repoList, status, "")
 
@@ -611,7 +671,7 @@ func (m Model) View() string {
 		focusLabel = "panel"
 	}
 	help := HelpStyle.PaddingLeft(1).Render(
-		fmt.Sprintf("q quit | p pause | r refresh | c config | D debug | s sort (%s) | t type | ←/→ focus (%s) | 1-%d repo | 0 clear%s",
+		fmt.Sprintf("q quit | p pause | r refresh | c config | D debug | s sort (%s) | t type | ↵ open | ←/→ focus (%s) | 1-%d repo | 0 clear%s",
 			sortLabel, focusLabel, len(m.cfg.Repos()), extra))
 
 	// Build main content area with focus badges
@@ -630,17 +690,20 @@ func (m Model) View() string {
 		panelWithBadge := lipgloss.JoinVertical(lipgloss.Left, panelBadge, panel)
 
 		// Build a full-height vertical divider
-		dividerHeight := m.height - 4 - 2 // header + footer
+		dividerHeight := m.contentHeight() + 1 // viewport + badge
 		dividerCol := DividerStyle.Render(strings.Repeat("│\n", dividerHeight))
 
 		streamView = lipgloss.JoinHorizontal(lipgloss.Top, streamView, dividerCol, panelWithBadge)
 	}
 
+	// Detail preview bar
+	detailBar := m.renderDetailBar()
+
 	// Compose
 	return lipgloss.JoinVertical(lipgloss.Left,
 		header,
 		streamView,
-		"",
+		detailBar,
 		help,
 	)
 }
@@ -756,6 +819,50 @@ func (m Model) renderStatusPanel() string {
 	return m.panelViewport.View()
 }
 
+// renderDetailBar returns a fixed 3-line preview bar (divider + 2 content lines).
+func (m Model) renderDetailBar() string {
+	divider := DividerStyle.Render(strings.Repeat("─", m.width))
+
+	if m.focus != focusStream {
+		return divider + "\n" + "\n"
+	}
+	de := m.cursorEvent()
+	if de == nil {
+		return divider + "\n" + "\n"
+	}
+	ev := de.Event
+
+	// Line 1: repo, type, actor, time
+	repo := ev.Repo.Name
+	label := ev.Label()
+	actor := ev.Actor.Login
+	t := ev.CreatedAt.Local().Format("2006-01-02 15:04:05")
+	color := EventColor(ev.Type)
+	line1 := fmt.Sprintf(" %s  %s  %s  %s",
+		lipgloss.NewStyle().Bold(true).Foreground(color).Render(label),
+		lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#ffffff")).Render(repo),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#d1d5db")).Render(actor),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Render(t),
+	)
+
+	// Line 2: full detail + URL hint
+	detail := ev.Detail()
+	maxDetail := m.width - 20
+	if maxDetail < 20 {
+		maxDetail = 20
+	}
+	if len(detail) > maxDetail {
+		detail = detail[:maxDetail-1] + "…"
+	}
+	urlHint := ""
+	if url := ev.URL(); url != "" {
+		urlHint = lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Render("  ↵ open")
+	}
+	line2 := " " + DetailStyle.Render(detail) + urlHint
+
+	return divider + "\n" + line1 + "\n" + line2
+}
+
 func relativeTime(t time.Time, now time.Time) string {
 	d := now.Sub(t)
 	if d < 0 {
@@ -806,6 +913,20 @@ func renderEventLine(ev github.Event, now time.Time) string {
 	)
 
 	return line
+}
+
+// openURL opens a URL in the default browser.
+func openURL(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	cmd.Start()
 }
 
 func pollEvents(cfg *config.Config, debugLog *DebugLog, initial bool) tea.Cmd {
@@ -888,6 +1009,12 @@ func pollEvents(cfg *config.Config, debugLog *DebugLog, initial bool) tea.Cmd {
 			all = append(all, r.events...)
 			allErrors = append(allErrors, r.errs...)
 		}
+
+		// Update rate limit (best effort, non-blocking)
+		if rl, err := github.FetchRateLimit(); err == nil {
+			debugLog.SetRateLimit(rl.Remaining, rl.Limit)
+		}
+
 		return eventsMsg{events: all, errors: allErrors}
 	}
 }
