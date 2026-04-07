@@ -45,7 +45,7 @@ func main() {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				os.Exit(1)
 			}
-			for _, r := range cfg.Repos {
+			for _, r := range cfg.Repos() {
 				fmt.Println(r)
 			}
 			return
@@ -64,7 +64,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if len(cfg.Repos) == 0 {
+	if len(cfg.Repos()) == 0 {
 		fmt.Fprintln(os.Stderr, "No repos configured. Run 'gitstream add owner/repo' to get started.")
 		os.Exit(1)
 	}

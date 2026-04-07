@@ -12,6 +12,7 @@ var (
 	ColorCreate  = lipgloss.Color("#22c55e") // green
 	ColorDelete  = lipgloss.Color("#ef4444") // red
 	ColorRelease = lipgloss.Color("#f97316") // orange
+	ColorLocal   = lipgloss.Color("#a78bfa") // light purple
 	ColorDim     = lipgloss.Color("#6b7280") // gray
 
 	// Layout styles
@@ -46,11 +47,69 @@ var (
 
 	HelpStyle = lipgloss.NewStyle().
 			Foreground(ColorDim)
+
+	FlashMarker = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#22c55e")).
+			Bold(true)
+
+	// Status panel styles
+	PanelBorderStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("#3b3b3b")).
+				Padding(0, 1)
+
+	PanelTitleStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#ffffff"))
+
+	PanelDividerStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#3b3b3b"))
+
+	PanelRepoStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#3b82f6"))
+
+	PanelDimStyle = lipgloss.NewStyle().
+			Foreground(ColorDim)
+
+	PanelCleanStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#22c55e"))
+
+	PanelDirtyStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#eab308"))
+
+	PanelWarnStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#f97316"))
+
+	PanelCIFailStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#ef4444"))
+
+	DividerStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#3b3b3b"))
+
+	CursorMarker = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#3b82f6")).
+			Bold(true)
+
+	CursorRowBg = lipgloss.NewStyle().
+			Background(lipgloss.Color("#1a1a2e"))
+
+	FocusBadgeActive = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("#000000")).
+				Background(lipgloss.Color("#3b82f6")).
+				Padding(0, 1)
+
+	FocusBadgeInactive = lipgloss.NewStyle().
+				Foreground(ColorDim).
+				Padding(0, 1)
 )
 
 // EventColor returns the color for a given event type.
 func EventColor(eventType string) lipgloss.Color {
 	switch eventType {
+	case "LocalPushEvent":
+		return ColorLocal
 	case "PushEvent":
 		return ColorPush
 	case "PullRequestEvent":
@@ -67,6 +126,8 @@ func EventColor(eventType string) lipgloss.Color {
 		return ColorDelete
 	case "ReleaseEvent":
 		return ColorRelease
+	case "MemberEvent":
+		return ColorComment
 	default:
 		return ColorDim
 	}

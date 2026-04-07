@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -91,11 +92,16 @@ func FetchCompare(repo, base, head string) (*CompareResult, error) {
 }
 
 // FetchEvents fetches recent events for a repo using the gh CLI.
-func FetchEvents(repo string, limit int) ([]Event, error) {
-	cmd := exec.Command("gh", "api", fmt.Sprintf("repos/%s/events", repo), "--cache", "0s")
+// page is 1-indexed; each page returns up to 30 events from the API.
+func FetchEvents(repo string, limit int, page int) ([]Event, error) {
+	if page < 1 {
+		page = 1
+	}
+	url := fmt.Sprintf("repos/%s/events?per_page=30&page=%d", repo, page)
+	cmd := exec.Command("gh", "api", url, "--cache", "0s")
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("gh api failed for %s: %w", repo, err)
+		return nil, fmt.Errorf("gh api failed for %s (page %d): %w", repo, page, err)
 	}
 
 	var events []Event
@@ -130,6 +136,8 @@ func EnrichPushEvent(ev *Event) {
 // Label returns a short human-readable label for an event type.
 func (e *Event) Label() string {
 	switch e.Type {
+	case "LocalPushEvent":
+		return "LOCAL"
 	case "PushEvent":
 		return "PUSH"
 	case "PullRequestEvent":
@@ -152,8 +160,20 @@ func (e *Event) Label() string {
 		return "FORK"
 	case "ReleaseEvent":
 		return "RELEASE"
+	case "MemberEvent":
+		return "MEMBER"
+	case "GollumEvent":
+		return "WIKI"
+	case "PublicEvent":
+		return "PUBLIC"
+	case "SponsorshipEvent":
+		return "SPONSOR"
 	default:
-		return e.Type
+		label := strings.TrimSuffix(e.Type, "Event")
+		if len(label) > 8 {
+			label = label[:8]
+		}
+		return strings.ToUpper(label)
 	}
 }
 
@@ -161,6 +181,16 @@ func (e *Event) Label() string {
 func (e *Event) Detail() string {
 	p := e.Payload
 	switch e.Type {
+	case "LocalPushEvent":
+		msg := ""
+		if len(p.Commits) > 0 {
+			msg = p.Commits[0].Message
+		}
+		ref := p.Ref
+		if ref == "" {
+			ref = "unpushed"
+		}
+		return fmt.Sprintf("↑ %s — %s", ref, msg)
 	case "PushEvent":
 		ref := p.Ref
 		if len(ref) > 11 && ref[:11] == "refs/heads/" {
@@ -204,8 +234,45 @@ func (e *Event) Detail() string {
 		if p.Release != nil {
 			return fmt.Sprintf("%s %s", p.Action, p.Release.TagName)
 		}
+	case "MemberEvent":
+		return p.Action
+	}
+	if p.Action != "" {
+		return p.Action
 	}
 	return ""
+}
+
+// URL returns a GitHub URL for the event, if applicable.
+func (e *Event) URL() string {
+	base := "https://github.com/" + e.Repo.Name
+	p := e.Payload
+	switch e.Type {
+	case "PushEvent":
+		if p.Head != "" {
+			return base + "/commit/" + p.Head
+		}
+	case "PullRequestEvent", "PullRequestReviewEvent", "PullRequestReviewCommentEvent":
+		if p.PullRequest != nil {
+			return fmt.Sprintf("%s/pull/%d", base, p.PullRequest.Number)
+		}
+	case "IssueCommentEvent", "IssuesEvent":
+		if p.Issue != nil {
+			return fmt.Sprintf("%s/issues/%d", base, p.Issue.Number)
+		}
+	case "ReleaseEvent":
+		if p.Release != nil {
+			return fmt.Sprintf("%s/releases/tag/%s", base, p.Release.TagName)
+		}
+	case "CreateEvent":
+		if p.RefType == "branch" && p.Ref != "" {
+			return fmt.Sprintf("%s/tree/%s", base, p.Ref)
+		}
+		if p.RefType == "tag" && p.Ref != "" {
+			return fmt.Sprintf("%s/releases/tag/%s", base, p.Ref)
+		}
+	}
+	return base
 }
 
 // ShortRepo returns just the repo name without the owner prefix.
