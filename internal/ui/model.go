@@ -630,8 +630,13 @@ func (m Model) View() string {
 		dot := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Render("○")
 		if h, ok := stats.RepoHealth[repo]; ok {
 			if h.LastSuccess {
+				// Green: live data
 				dot = lipgloss.NewStyle().Foreground(lipgloss.Color("#22c55e")).Render("●")
+			} else if h.UsingCache && h.FailStreak < cacheStaleThreshold {
+				// Yellow: serving cached data
+				dot = lipgloss.NewStyle().Foreground(lipgloss.Color("#eab308")).Render("●")
 			} else {
+				// Red: no data or cache stale (10+ failures)
 				dot = lipgloss.NewStyle().Foreground(lipgloss.Color("#ef4444")).Render("●")
 			}
 		}
@@ -929,6 +934,30 @@ func openURL(url string) {
 	cmd.Start()
 }
 
+// eventCache stores last successful events per repo for fallback.
+var (
+	eventCacheMu sync.Mutex
+	eventCache   = make(map[string][]github.Event)
+)
+
+// fetchWithRetries fetches events for a repo/page with up to 3 retries and exponential backoff.
+func fetchWithRetries(repo string, limit, page int) ([]github.Event, error) {
+	var lastErr error
+	backoff := 500 * time.Millisecond
+	for attempt := 0; attempt < 3; attempt++ {
+		events, err := github.FetchEvents(repo, limit, page)
+		if err == nil {
+			return events, nil
+		}
+		lastErr = err
+		if attempt < 2 {
+			time.Sleep(backoff)
+			backoff *= 2
+		}
+	}
+	return nil, lastErr
+}
+
 func pollEvents(cfg *config.Config, debugLog *DebugLog, initial bool) tea.Cmd {
 	return func() tea.Msg {
 		type result struct {
@@ -952,22 +981,33 @@ func pollEvents(cfg *config.Config, debugLog *DebugLog, initial bool) tea.Cmd {
 				defer wg.Done()
 				var allEvents []github.Event
 				var errs []string
+				fetchFailed := false
 
 				for page := 1; page <= pages; page++ {
-					events, err := github.FetchEvents(r, 30, page)
+					events, err := fetchWithRetries(r, 30, page)
 					if err != nil {
-						// Retry once after a short pause
-						time.Sleep(500 * time.Millisecond)
-						events, err = github.FetchEvents(r, 30, page)
-						if err != nil {
-							errs = append(errs, fmt.Sprintf("%s page %d: %v", r, page, err))
-							debugLog.RecordFetch(r, false, 0)
-							continue
-						}
+						errs = append(errs, fmt.Sprintf("%s page %d: %v (3 retries exhausted)", r, page, err))
+						fetchFailed = true
+						continue
 					}
 					allEvents = append(allEvents, events...)
-					debugLog.RecordFetch(r, true, len(events))
 					debugLog.Info("Fetched %d events from %s (page %d)", len(events), r, page)
+				}
+
+				// If fetch failed entirely, fall back to cache
+				if len(allEvents) == 0 && fetchFailed {
+					eventCacheMu.Lock()
+					cached := eventCache[r]
+					eventCacheMu.Unlock()
+					if len(cached) > 0 {
+						debugLog.Warn("Using cached events for %s (%d events)", r, len(cached))
+						debugLog.RecordFetch(r, false, 0, true)
+						results[i] = result{events: cached, errs: errs}
+						return
+					}
+					debugLog.RecordFetch(r, false, 0, false)
+					results[i] = result{errs: errs}
+					return
 				}
 
 				// Deduplicate by event ID across pages
@@ -984,6 +1024,13 @@ func pollEvents(cfg *config.Config, debugLog *DebugLog, initial bool) tea.Cmd {
 				if len(deduped) > 50 {
 					deduped = deduped[:50]
 				}
+
+				// Update cache with fresh events
+				eventCacheMu.Lock()
+				eventCache[r] = deduped
+				eventCacheMu.Unlock()
+
+				debugLog.RecordFetch(r, true, len(deduped), false)
 
 				// Enrich push events in parallel
 				var ewg sync.WaitGroup

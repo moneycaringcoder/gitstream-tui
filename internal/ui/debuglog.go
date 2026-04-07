@@ -38,7 +38,10 @@ type DebugLog struct {
 type RepoHealth struct {
 	LastSuccess bool
 	FailStreak  int
+	UsingCache  bool // true when serving cached events due to fetch failure
 }
+
+const cacheStaleThreshold = 10 // consecutive failures before going red
 
 // FetchStats tracks API call statistics.
 type FetchStats struct {
@@ -76,7 +79,7 @@ func (d *DebugLog) Info(format string, args ...interface{})  { d.Log(LogInfo, fo
 func (d *DebugLog) Warn(format string, args ...interface{})  { d.Log(LogWarn, format, args...) }
 func (d *DebugLog) Error(format string, args ...interface{}) { d.Log(LogError, format, args...) }
 
-func (d *DebugLog) RecordFetch(repo string, success bool, eventCount int) {
+func (d *DebugLog) RecordFetch(repo string, success bool, eventCount int, usingCache bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.stats.TotalCalls++
@@ -94,10 +97,12 @@ func (d *DebugLog) RecordFetch(repo string, success bool, eventCount int) {
 		d.stats.TotalEvents += eventCount
 		h.LastSuccess = true
 		h.FailStreak = 0
+		h.UsingCache = false
 	} else {
 		d.stats.FailedCalls++
 		h.LastSuccess = false
 		h.FailStreak++
+		h.UsingCache = usingCache
 	}
 }
 
