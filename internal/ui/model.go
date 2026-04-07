@@ -301,8 +301,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				sort.Slice(m.events, func(i, j int) bool {
 					return m.events[i].Event.CreatedAt.Before(m.events[j].Event.CreatedAt)
 				})
+				// Auto-scroll to show newest events if user hasn't scrolled away
+				atEdge := m.isStreamAtNewEdge()
 				m.rebuildViewport()
-				m.viewport.GotoBottom()
+				if atEdge {
+					if m.newestFirst {
+						m.viewport.GotoTop()
+					} else {
+						m.viewport.GotoBottom()
+					}
+				}
 			}
 		}
 		m.lastPoll = time.Now()
@@ -355,7 +363,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			sort.Slice(m.events, func(i, j int) bool {
 				return m.events[i].Event.CreatedAt.Before(m.events[j].Event.CreatedAt)
 			})
+			atEdge := m.isStreamAtNewEdge()
 			m.rebuildViewport()
+			if atEdge {
+				if m.newestFirst {
+					m.viewport.GotoTop()
+				} else {
+					m.viewport.GotoBottom()
+				}
+			}
 		}
 
 	case uiTickMsg:
@@ -395,6 +411,14 @@ func (m *Model) streamWidth() int {
 
 func (m *Model) hasPanel() bool {
 	return len(m.localRepos) > 0 && m.width-statusPanelWidth-3 >= 40
+}
+
+// isStreamAtNewEdge returns true if the viewport is scrolled to where new events appear.
+func (m *Model) isStreamAtNewEdge() bool {
+	if m.newestFirst {
+		return m.viewport.YOffset == 0
+	}
+	return m.viewport.AtBottom()
 }
 
 func (m *Model) ensureCursorVisible() {
