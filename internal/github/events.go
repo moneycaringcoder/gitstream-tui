@@ -116,6 +116,26 @@ func FetchEvents(repo string, limit int, page int) ([]Event, error) {
 	return events, nil
 }
 
+// RateLimit holds GitHub API rate limit info.
+type RateLimit struct {
+	Remaining int
+	Limit     int
+}
+
+// FetchRateLimit queries the GitHub API rate limit.
+func FetchRateLimit() (*RateLimit, error) {
+	cmd := exec.Command("gh", "api", "rate_limit", "--jq", ".rate | {remaining, limit}")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	var rl RateLimit
+	if err := json.Unmarshal(out, &rl); err != nil {
+		return nil, err
+	}
+	return &rl, nil
+}
+
 // EnrichPushEvent fetches compare stats and populates the event's detail cache.
 func EnrichPushEvent(ev *Event) {
 	if ev.Type != "PushEvent" || ev.Payload.Before == "" || ev.Payload.Head == "" {

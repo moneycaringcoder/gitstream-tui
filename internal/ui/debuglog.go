@@ -34,6 +34,15 @@ type DebugLog struct {
 	stats   FetchStats
 }
 
+// RepoHealth tracks per-repo fetch health.
+type RepoHealth struct {
+	LastSuccess bool
+	FailStreak  int
+	UsingCache  bool // true when serving cached events due to fetch failure
+}
+
+const cacheStaleThreshold = 10 // consecutive failures before going red
+
 // FetchStats tracks API call statistics.
 type FetchStats struct {
 	TotalCalls   int
@@ -41,6 +50,9 @@ type FetchStats struct {
 	FailedCalls  int
 	TotalEvents  int
 	LastFetchAt  time.Time
+	RepoHealth   map[string]*RepoHealth
+	RateRemain   int // GitHub API rate limit remaining
+	RateLimit    int // GitHub API rate limit total
 }
 
 func NewDebugLog() *DebugLog {
@@ -67,17 +79,38 @@ func (d *DebugLog) Info(format string, args ...interface{})  { d.Log(LogInfo, fo
 func (d *DebugLog) Warn(format string, args ...interface{})  { d.Log(LogWarn, format, args...) }
 func (d *DebugLog) Error(format string, args ...interface{}) { d.Log(LogError, format, args...) }
 
-func (d *DebugLog) RecordFetch(repo string, success bool, eventCount int) {
+func (d *DebugLog) RecordFetch(repo string, success bool, eventCount int, usingCache bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.stats.TotalCalls++
 	d.stats.LastFetchAt = time.Now()
+	if d.stats.RepoHealth == nil {
+		d.stats.RepoHealth = make(map[string]*RepoHealth)
+	}
+	h, ok := d.stats.RepoHealth[repo]
+	if !ok {
+		h = &RepoHealth{}
+		d.stats.RepoHealth[repo] = h
+	}
 	if success {
 		d.stats.SuccessCalls++
 		d.stats.TotalEvents += eventCount
+		h.LastSuccess = true
+		h.FailStreak = 0
+		h.UsingCache = false
 	} else {
 		d.stats.FailedCalls++
+		h.LastSuccess = false
+		h.FailStreak++
+		h.UsingCache = usingCache
 	}
+}
+
+func (d *DebugLog) SetRateLimit(remaining, limit int) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.stats.RateRemain = remaining
+	d.stats.RateLimit = limit
 }
 
 func (d *DebugLog) GetStats() FetchStats {
