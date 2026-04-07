@@ -94,6 +94,16 @@ var (
 	CursorRowBg = lipgloss.NewStyle().
 			Background(lipgloss.Color("#1a1a2e"))
 
+	DetailRepoStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#ffffff"))
+
+	DetailActorStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#d1d5db"))
+
+	DetailTimeStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#6b7280"))
+
 	FocusBadgeActive = lipgloss.NewStyle().
 				Bold(true).
 				Foreground(lipgloss.Color("#000000")).
@@ -139,4 +149,9 @@ func LabelStyle(eventType string) lipgloss.Style {
 		Foreground(EventColor(eventType)).
 		Width(9).
 		Bold(true)
+}
+
+// DetailLabelStyle returns a bold label style with a given color.
+func DetailLabelStyle(color lipgloss.Color) lipgloss.Style {
+	return lipgloss.NewStyle().Bold(true).Foreground(color)
 }
