@@ -70,6 +70,8 @@ func EventColor(eventType string) lipgloss.Color {
 		return ColorDelete
 	case "ReleaseEvent":
 		return ColorRelease
+	case "MemberEvent":
+		return ColorComment
 	default:
 		return ColorDim
 	}

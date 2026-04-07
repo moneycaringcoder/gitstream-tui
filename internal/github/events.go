@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -152,8 +153,20 @@ func (e *Event) Label() string {
 		return "FORK"
 	case "ReleaseEvent":
 		return "RELEASE"
+	case "MemberEvent":
+		return "MEMBER"
+	case "GollumEvent":
+		return "WIKI"
+	case "PublicEvent":
+		return "PUBLIC"
+	case "SponsorshipEvent":
+		return "SPONSOR"
 	default:
-		return e.Type
+		label := strings.TrimSuffix(e.Type, "Event")
+		if len(label) > 8 {
+			label = label[:8]
+		}
+		return strings.ToUpper(label)
 	}
 }
 
@@ -204,6 +217,11 @@ func (e *Event) Detail() string {
 		if p.Release != nil {
 			return fmt.Sprintf("%s %s", p.Action, p.Release.TagName)
 		}
+	case "MemberEvent":
+		return p.Action
+	}
+	if p.Action != "" {
+		return p.Action
 	}
 	return ""
 }
