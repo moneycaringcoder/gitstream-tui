@@ -1,0 +1,44 @@
+version: 2
+
+builds:
+  - main: ./cmd/gitstream
+    binary: gitstream
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+
+brews:
+  - repository:
+      owner: moneycaringcoder
+      name: homebrew-tap
+    homepage: "https://github.com/moneycaringcoder/gitstream-tui"
+    description: "Live GitHub activity feed TUI — watch repo events in your terminal"
+    license: "MIT"
+
+scoops:
+  - repository:
+      owner: moneycaringcoder
+      name: scoop-bucket
+    homepage: "https://github.com/moneycaringcoder/gitstream-tui"
+    description: "Live GitHub activity feed TUI — watch repo events in your terminal"
+    license: "MIT"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
