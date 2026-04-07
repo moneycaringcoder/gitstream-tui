@@ -170,6 +170,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "s":
 			m.newestFirst = !m.newestFirst
 			m.rebuildViewport()
+			// Snap cursor to newest edge after sort flip
+			if m.newestFirst {
+				m.streamCursor = 0
+				m.viewport.GotoTop()
+			} else {
+				m.streamCursor = max(0, m.streamLineCount-1)
+				m.viewport.GotoBottom()
+			}
 		case "t":
 			// Cycle through type filters
 			cur := 0
@@ -306,8 +314,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.rebuildViewport()
 				if atEdge {
 					if m.newestFirst {
+						m.streamCursor = 0
 						m.viewport.GotoTop()
 					} else {
+						m.streamCursor = max(0, m.streamLineCount-1)
 						m.viewport.GotoBottom()
 					}
 				}
