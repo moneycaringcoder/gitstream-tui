@@ -940,14 +940,15 @@ var (
 	eventCache   = make(map[string][]github.Event)
 )
 
-// fetchWithRetries fetches events for a repo/page with up to 3 retries and exponential backoff.
-func fetchWithRetries(repo string, limit, page int) ([]github.Event, error) {
+// fetchWithRetries fetches events with up to 3 retries and exponential backoff.
+// Returns the FetchResult on success (including 304 Not Modified).
+func fetchWithRetries(repo string, limit, page int) (*github.FetchResult, error) {
 	var lastErr error
 	backoff := 500 * time.Millisecond
 	for attempt := 0; attempt < 3; attempt++ {
-		events, err := github.FetchEvents(repo, limit, page)
+		result, err := github.FetchEvents(repo, limit, page)
 		if err == nil {
-			return events, nil
+			return result, nil
 		}
 		lastErr = err
 		if attempt < 2 {
@@ -975,6 +976,10 @@ func pollEvents(cfg *config.Config, debugLog *DebugLog, initial bool) tea.Cmd {
 			pages = 2
 		}
 
+		// Track latest rate limit seen across all fetches
+		var rlMu sync.Mutex
+		latestRL := github.RateLimit{}
+
 		for idx, repo := range repos {
 			wg.Add(1)
 			go func(i int, r string) {
@@ -982,16 +987,43 @@ func pollEvents(cfg *config.Config, debugLog *DebugLog, initial bool) tea.Cmd {
 				var allEvents []github.Event
 				var errs []string
 				fetchFailed := false
+				notModifiedCount := 0
 
 				for page := 1; page <= pages; page++ {
-					events, err := fetchWithRetries(r, 30, page)
+					fr, err := fetchWithRetries(r, 30, page)
 					if err != nil {
 						errs = append(errs, fmt.Sprintf("%s page %d: %v (3 retries exhausted)", r, page, err))
 						fetchFailed = true
 						continue
 					}
-					allEvents = append(allEvents, events...)
-					debugLog.Info("Fetched %d events from %s (page %d)", len(events), r, page)
+
+					// Update rate limit from response headers
+					if fr.RateLimit > 0 {
+						rlMu.Lock()
+						latestRL = github.RateLimit{Remaining: fr.RateRemain, Limit: fr.RateLimit}
+						rlMu.Unlock()
+					}
+
+					if fr.NotModified {
+						notModifiedCount++
+						debugLog.Info("304 Not Modified for %s (page %d) — no rate limit cost", r, page)
+						continue
+					}
+
+					allEvents = append(allEvents, fr.Events...)
+					debugLog.Info("Fetched %d events from %s (page %d)", len(fr.Events), r, page)
+				}
+
+				// If all pages returned 304, serve from cache (data unchanged)
+				if notModifiedCount == pages && !fetchFailed {
+					eventCacheMu.Lock()
+					cached := eventCache[r]
+					eventCacheMu.Unlock()
+					if len(cached) > 0 {
+						debugLog.RecordFetch(r, true, len(cached), false)
+						results[i] = result{events: cached}
+						return
+					}
 				}
 
 				// If fetch failed entirely, fall back to cache
@@ -1057,9 +1089,9 @@ func pollEvents(cfg *config.Config, debugLog *DebugLog, initial bool) tea.Cmd {
 			allErrors = append(allErrors, r.errs...)
 		}
 
-		// Update rate limit (best effort, non-blocking)
-		if rl, err := github.FetchRateLimit(); err == nil {
-			debugLog.SetRateLimit(rl.Remaining, rl.Limit)
+		// Update rate limit from inline headers (no extra API call needed)
+		if latestRL.Limit > 0 {
+			debugLog.SetRateLimit(latestRL.Remaining, latestRL.Limit)
 		}
 
 		return eventsMsg{events: all, errors: allErrors}
