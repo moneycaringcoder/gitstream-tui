@@ -101,6 +101,22 @@ func Discover(watchedRepos []string, explicitPaths map[string]string) []LocalRep
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
+	checkCandidate := func(path string) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			remote := remoteForPath(path)
+			if remote == "" || !wanted[remote] {
+				return
+			}
+			mu.Lock()
+			if _, exists := found[remote]; !exists {
+				found[remote] = path
+			}
+			mu.Unlock()
+		}()
+	}
+
 	for _, dir := range scanDirs {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -111,24 +127,27 @@ func Discover(watchedRepos []string, explicitPaths map[string]string) []LocalRep
 				continue
 			}
 			candidate := filepath.Join(dir, entry.Name())
-			// Quick check: does .git exist?
-			if _, err := os.Stat(filepath.Join(candidate, ".git")); err != nil {
+
+			// .git can be a directory (normal repo) or a file (worktree)
+			if _, err := os.Stat(filepath.Join(candidate, ".git")); err == nil {
+				checkCandidate(candidate)
 				continue
 			}
 
-			wg.Add(1)
-			go func(path string) {
-				defer wg.Done()
-				remote := remoteForPath(path)
-				if remote == "" || !wanted[remote] {
-					return
+			// Scan one level deeper for worktrees nested under a parent dir
+			subEntries, err := os.ReadDir(candidate)
+			if err != nil {
+				continue
+			}
+			for _, sub := range subEntries {
+				if !sub.IsDir() {
+					continue
 				}
-				mu.Lock()
-				if _, exists := found[remote]; !exists {
-					found[remote] = path
+				subCandidate := filepath.Join(candidate, sub.Name())
+				if _, err := os.Stat(filepath.Join(subCandidate, ".git")); err == nil {
+					checkCandidate(subCandidate)
 				}
-				mu.Unlock()
-			}(candidate)
+			}
 		}
 	}
 	wg.Wait()
