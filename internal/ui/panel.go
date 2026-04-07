@@ -5,27 +5,33 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	tuikit "github.com/moneycaringcoder/tuikit-go"
 	"github.com/moneycaringcoder/gitstream-tui/internal/gitstatus"
 )
+
+// panelLine is a single rendered line in the status panel.
+type panelLine struct {
+	text string
+}
 
 // StatusPanel displays local repo git status.
 // Implements tuikit.Component.
 type StatusPanel struct {
 	repoStatus []gitstatus.RepoStatus
-	viewport   viewport.Model
-	cursor     int
-	lineCount  int
+	listView   *tuikit.ListView[panelLine]
 	focused    bool
 	width      int
-	ready      bool
 }
 
 func NewStatusPanel() *StatusPanel {
-	return &StatusPanel{}
+	p := &StatusPanel{}
+	p.listView = tuikit.NewListView(tuikit.ListViewOpts[panelLine]{
+		RenderItem: func(item panelLine, idx int, isCursor bool, theme tuikit.Theme) string {
+			return item.text
+		},
+	})
+	return p
 }
 
 func (p *StatusPanel) Init() tea.Cmd { return nil }
@@ -33,7 +39,8 @@ func (p *StatusPanel) Init() tea.Cmd { return nil }
 func (p *StatusPanel) Update(msg tea.Msg) (tuikit.Component, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		return p.handleKey(msg)
+		cmd := p.listView.HandleKey(msg)
+		return p, cmd
 	case gitStatusMsg:
 		p.repoStatus = msg.statuses
 		p.rebuildContent()
@@ -42,47 +49,8 @@ func (p *StatusPanel) Update(msg tea.Msg) (tuikit.Component, tea.Cmd) {
 	return p, nil
 }
 
-func (p *StatusPanel) handleKey(msg tea.KeyMsg) (tuikit.Component, tea.Cmd) {
-	switch msg.String() {
-	case "up", "k":
-		if p.cursor > 0 {
-			p.cursor--
-		}
-		p.rebuildContent()
-		p.ensureCursorVisible()
-		return p, tuikit.Consumed()
-	case "down", "j":
-		if p.cursor < p.lineCount-1 {
-			p.cursor++
-		}
-		p.rebuildContent()
-		p.ensureCursorVisible()
-		return p, tuikit.Consumed()
-	case "home", "g":
-		p.cursor = 0
-		p.rebuildContent()
-		p.ensureCursorVisible()
-		return p, tuikit.Consumed()
-	case "end", "G":
-		p.cursor = max(0, p.lineCount-1)
-		p.rebuildContent()
-		p.ensureCursorVisible()
-		return p, tuikit.Consumed()
-	}
-	return p, nil
-}
-
 func (p *StatusPanel) View() string {
-	if !p.ready {
-		return "PANEL NOT READY"
-	}
-	badge := FocusBadgeInactive.Render("Local")
-	if p.focused {
-		badge = FocusBadgeActive.Render("Local")
-	}
-	vpView := strings.TrimRight(p.viewport.View(), "\n")
-	view := lipgloss.JoinVertical(lipgloss.Left, badge, vpView)
-	return lipgloss.NewStyle().MaxWidth(p.width).Render(view)
+	return p.listView.View()
 }
 
 func (p *StatusPanel) KeyBindings() []tuikit.KeyBind {
@@ -94,39 +62,22 @@ func (p *StatusPanel) KeyBindings() []tuikit.KeyBind {
 
 func (p *StatusPanel) SetSize(w, h int) {
 	p.width = w
-	vpHeight := h - 1 // badge
-	if vpHeight < 3 {
-		vpHeight = 3
-	}
-	if !p.ready {
-		p.viewport = viewport.New(w, vpHeight)
-		p.ready = true
-	} else {
-		p.viewport.Width = w
-		p.viewport.Height = vpHeight
-	}
-	p.rebuildContent()
+	p.listView.SetSize(w, h)
 }
 
 func (p *StatusPanel) Focused() bool    { return p.focused }
-func (p *StatusPanel) SetFocused(f bool) { p.focused = f; p.rebuildContent() }
+func (p *StatusPanel) SetFocused(f bool) {
+	p.focused = f
+	p.listView.SetFocused(f)
+}
 
 func (p *StatusPanel) rebuildContent() {
-	var lines []string
-
-	addLine := func(line string) {
-		idx := len(lines)
-		if p.focused && idx == p.cursor {
-			line = CursorMarker.Render("▌") + line
-		}
-		lines = append(lines, line)
-	}
+	var lines []panelLine
 
 	if len(p.repoStatus) == 0 {
-		addLine("")
-		addLine(PanelDimStyle.Render("  Scanning for repos..."))
-		p.lineCount = len(lines)
-		p.viewport.SetContent(strings.Join(lines, "\n"))
+		lines = append(lines, panelLine{text: ""})
+		lines = append(lines, panelLine{text: PanelDimStyle.Render("Scanning for repos...")})
+		p.listView.SetItems(lines)
 		return
 	}
 
@@ -139,25 +90,25 @@ func (p *StatusPanel) rebuildContent() {
 		}
 
 		if s.Error != nil {
-			addLine(PanelRepoStyle.Render("  ◆ " + short))
-			addLine(PanelDimStyle.Render("    error"))
-			addLine("")
+			lines = append(lines, panelLine{text: PanelRepoStyle.Render("◆ " + short)})
+			lines = append(lines, panelLine{text: PanelDimStyle.Render("  error")})
+			lines = append(lines, panelLine{text: ""})
 			continue
 		}
 
-		addLine(PanelRepoStyle.Render("  ◆ " + short))
-		addLine(PanelDimStyle.Render(fmt.Sprintf("    ᛘ %s", s.Branch)))
+		lines = append(lines, panelLine{text: PanelRepoStyle.Render("◆ " + short)})
+		lines = append(lines, panelLine{text: PanelDimStyle.Render(fmt.Sprintf("  ᛘ %s", s.Branch))})
 
 		if s.Uncommitted == 0 && s.Unpushed == 0 {
-			addLine(PanelCleanStyle.Render("    ✓ clean"))
+			lines = append(lines, panelLine{text: PanelCleanStyle.Render("  ✓ clean")})
 		} else {
 			if s.Uncommitted > 0 {
-				addLine(PanelDirtyStyle.Render(
-					fmt.Sprintf("    ● %d uncommitted", s.Uncommitted)))
+				lines = append(lines, panelLine{text: PanelDirtyStyle.Render(
+					fmt.Sprintf("  ● %d uncommitted", s.Uncommitted))})
 			}
 			if s.Unpushed > 0 {
-				addLine(PanelWarnStyle.Render(
-					fmt.Sprintf("    ↑ %d unpushed", s.Unpushed)))
+				lines = append(lines, panelLine{text: PanelWarnStyle.Render(
+					fmt.Sprintf("  ↑ %d unpushed", s.Unpushed))})
 				for _, c := range s.UnpushedCommits {
 					msg := c.Message
 					maxLen := p.width - 10
@@ -167,52 +118,38 @@ func (p *StatusPanel) rebuildContent() {
 					if len(msg) > maxLen {
 						msg = msg[:maxLen-1] + "…"
 					}
-					addLine(PanelDimStyle.Render(
-						fmt.Sprintf("      %s %s", c.SHA, msg)))
+					lines = append(lines, panelLine{text: PanelDimStyle.Render(
+						fmt.Sprintf("    %s %s", c.SHA, msg))})
 				}
 			}
 		}
 		if !s.HasUpstream {
-			addLine(PanelDimStyle.Render("    ⚠ no upstream"))
+			lines = append(lines, panelLine{text: PanelDimStyle.Render("  ⚠ no upstream")})
 		}
 
 		if s.CI != nil {
 			var ciLine string
 			switch s.CI.Conclusion {
 			case "success":
-				ciLine = PanelCleanStyle.Render("    ✓ CI passed")
+				ciLine = PanelCleanStyle.Render("  ✓ CI passed")
 			case "failure":
-				ciLine = PanelCIFailStyle.Render("    ✗ CI failed")
+				ciLine = PanelCIFailStyle.Render("  ✗ CI failed")
 			case "cancelled":
-				ciLine = PanelDimStyle.Render("    ○ CI cancelled")
+				ciLine = PanelDimStyle.Render("  ○ CI cancelled")
 			default:
 				if s.CI.Status == "in_progress" {
-					ciLine = PanelWarnStyle.Render("    ◌ CI running")
+					ciLine = PanelWarnStyle.Render("  ◌ CI running")
 				} else {
-					ciLine = PanelDimStyle.Render(fmt.Sprintf("    ○ CI %s", s.CI.Conclusion))
+					ciLine = PanelDimStyle.Render(fmt.Sprintf("  ○ CI %s", s.CI.Conclusion))
 				}
 			}
-			addLine(ciLine)
+			lines = append(lines, panelLine{text: ciLine})
 		}
 
-		addLine("")
+		lines = append(lines, panelLine{text: ""})
 	}
 
-	p.lineCount = len(lines)
-	if p.cursor >= p.lineCount && p.lineCount > 0 {
-		p.cursor = p.lineCount - 1
-	}
-	p.viewport.SetContent(strings.Join(lines, "\n"))
-}
-
-func (p *StatusPanel) ensureCursorVisible() {
-	vpHeight := p.viewport.Height
-	yOffset := p.viewport.YOffset
-	if p.cursor < yOffset {
-		p.viewport.SetYOffset(p.cursor)
-	} else if p.cursor >= yOffset+vpHeight {
-		p.viewport.SetYOffset(p.cursor - vpHeight + 1)
-	}
+	p.listView.SetItems(lines)
 }
 
 func sortedRepoStatus(statuses []gitstatus.RepoStatus) []gitstatus.RepoStatus {

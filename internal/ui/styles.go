@@ -48,10 +48,6 @@ var (
 	HelpStyle = lipgloss.NewStyle().
 			Foreground(ColorDim)
 
-	FlashMarker = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#22c55e")).
-			Bold(true)
-
 	// Status panel styles
 	PanelBorderStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
@@ -87,13 +83,6 @@ var (
 	DividerStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#3b3b3b"))
 
-	CursorMarker = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#3b82f6")).
-			Bold(true)
-
-	CursorRowBg = lipgloss.NewStyle().
-			Background(lipgloss.Color("#1a1a2e"))
-
 	DetailRepoStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("#ffffff"))
@@ -103,16 +92,6 @@ var (
 
 	DetailTimeStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#6b7280"))
-
-	FocusBadgeActive = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.Color("#000000")).
-				Background(lipgloss.Color("#3b82f6")).
-				Padding(0, 1)
-
-	FocusBadgeInactive = lipgloss.NewStyle().
-				Foreground(ColorDim).
-				Padding(0, 1)
 )
 
 // EventColor returns the color for a given event type.

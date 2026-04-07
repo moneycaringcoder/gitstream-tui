@@ -169,6 +169,8 @@ func main() {
 		tuikit.WithLayout(&tuikit.DualPane{
 			Main:         stream,
 			Side:         panel,
+			MainName:     "Stream",
+			SideName:     "Local",
 			SideWidth:    32,
 			MinMainWidth: 40,
 			SideRight:    true,
