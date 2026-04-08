@@ -28,4 +28,6 @@ config.yaml
 
 # AI tooling
 .claude/
+.opencode/
+AGENTS.md
 docs/
