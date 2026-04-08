@@ -3,6 +3,9 @@ version: 2
 builds:
   - main: ./cmd/gitstream
     binary: gitstream
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
     env:
       - CGO_ENABLED=0
     goos:

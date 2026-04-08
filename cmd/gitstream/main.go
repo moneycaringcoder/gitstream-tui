@@ -15,6 +15,8 @@ import (
 	"github.com/moneycaringcoder/gitstream-tui/internal/ui"
 )
 
+var version = "dev"
+
 func main() {
 	args := os.Args[1:]
 
@@ -74,6 +76,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, "No repos configured. Run 'gitstream add owner/repo' to get started.")
 		os.Exit(1)
 	}
+
+	tuikit.CleanupOldBinary()
 
 	debugLog := ui.NewDebugLog()
 	stream := ui.NewEventStream(cfg, debugLog)
@@ -230,6 +234,13 @@ func main() {
 		}),
 		tuikit.WithMouseSupport(),
 		tuikit.WithTickInterval(time.Second),
+		tuikit.WithAutoUpdate(tuikit.UpdateConfig{
+			Owner:      "moneycaringcoder",
+			Repo:       "gitstream-tui",
+			BinaryName: "gitstream",
+			Version:    version,
+			Mode:       tuikit.UpdateNotify,
+		}),
 	)
 
 	// Register repo number filters (1-9)
