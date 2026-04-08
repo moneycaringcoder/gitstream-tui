@@ -80,5 +80,8 @@ func OpenURL(url string) {
 	default:
 		cmd = exec.Command("xdg-open", url)
 	}
-	cmd.Start()
+	if err := cmd.Start(); err != nil {
+		return
+	}
+	go cmd.Wait()
 }
