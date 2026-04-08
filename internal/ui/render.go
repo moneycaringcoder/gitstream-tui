@@ -2,11 +2,10 @@ package ui
 
 import (
 	"fmt"
-	"os/exec"
-	"runtime"
 	"time"
 
 	"github.com/moneycaringcoder/gitstream-tui/internal/github"
+	tuikit "github.com/moneycaringcoder/tuikit-go"
 )
 
 const flashDuration = 3 * time.Second
@@ -17,34 +16,9 @@ type DisplayEvent struct {
 	AddedAt time.Time
 }
 
-func relativeTime(t time.Time, now time.Time) string {
-	d := now.Sub(t)
-	if d < 0 {
-		d = 0
-	}
-	switch {
-	case d < time.Minute:
-		return fmt.Sprintf("%ds ago", int(d.Seconds()))
-	case d < time.Hour:
-		return fmt.Sprintf("%dm ago", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh ago", int(d.Hours()))
-	default:
-		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
-	}
-}
-
-// osc8 wraps text in an OSC8 hyperlink escape sequence.
-func osc8(url, text string) string {
-	if url == "" {
-		return text
-	}
-	return fmt.Sprintf("\x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\", url, text)
-}
-
 func renderEventLine(ev github.Event, now time.Time) string {
 	t := ev.CreatedAt.Local().Format("15:04:05")
-	rel := relativeTime(ev.CreatedAt, now)
+	rel := tuikit.RelativeTime(ev.CreatedAt, now)
 	timeStr := fmt.Sprintf("%s %s", t, rel)
 
 	label := ev.Label()
@@ -55,7 +29,7 @@ func renderEventLine(ev github.Event, now time.Time) string {
 
 	detailRendered := DetailStyle.Render(detail)
 	if url != "" {
-		detailRendered = osc8(url, detailRendered)
+		detailRendered = tuikit.OSC8Link(url, detailRendered)
 	}
 
 	line := fmt.Sprintf("%s  %s %s %s %s",
@@ -67,21 +41,4 @@ func renderEventLine(ev github.Event, now time.Time) string {
 	)
 
 	return line
-}
-
-// OpenURL opens a URL in the default browser.
-func OpenURL(url string) {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", url)
-	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
-	default:
-		cmd = exec.Command("xdg-open", url)
-	}
-	if err := cmd.Start(); err != nil {
-		return
-	}
-	go cmd.Wait()
 }

@@ -92,7 +92,7 @@ func main() {
 		OnKey: func(de ui.DisplayEvent, key tea.KeyMsg) tea.Cmd {
 			if key.String() == "o" {
 				if url := de.Event.URL(); url != "" {
-					ui.OpenURL(url)
+					tuikit.OpenURL(url)
 				}
 				return tuikit.Consumed()
 			}

@@ -72,7 +72,7 @@ func NewEventStream(cfg *config.Config, debugLog *DebugLog) *EventStream {
 			return s.renderHeader()
 		},
 		DetailFunc: func(item DisplayEvent, theme tuikit.Theme) string {
-			return s.renderDetailBar(item)
+			return s.renderDetailBar(item, theme)
 		},
 		FlashFunc: func(item DisplayEvent, now time.Time) bool {
 			return !item.AddedAt.IsZero() && now.Before(item.AddedAt.Add(flashDuration))
@@ -115,7 +115,7 @@ func (s *EventStream) Update(msg tea.Msg) (tuikit.Component, tea.Cmd) {
 		if msg.String() == "o" {
 			if item := s.listView.CursorItem(); item != nil {
 				if url := item.Event.URL(); url != "" {
-					OpenURL(url)
+					tuikit.OpenURL(url)
 				}
 				return s, tuikit.Consumed()
 			}
@@ -293,9 +293,9 @@ func (s *EventStream) renderHeader() string {
 	return lipgloss.JoinVertical(lipgloss.Left, title, repoList, status, "")
 }
 
-func (s *EventStream) renderDetailBar(de DisplayEvent) string {
+func (s *EventStream) renderDetailBar(de DisplayEvent, theme tuikit.Theme) string {
 	ev := de.Event
-	divider := DividerStyle.Render(strings.Repeat("─", s.width))
+	divider := tuikit.Divider(s.width, theme)
 
 	repo := ev.Repo.Name
 	label := ev.Label()
@@ -310,14 +310,7 @@ func (s *EventStream) renderDetailBar(de DisplayEvent) string {
 		DetailTimeStyle.Render(t),
 	)
 
-	detail := ev.Detail()
-	maxDetail := s.width - 20
-	if maxDetail < 20 {
-		maxDetail = 20
-	}
-	if len(detail) > maxDetail {
-		detail = detail[:maxDetail-1] + "…"
-	}
+	detail := tuikit.Truncate(ev.Detail(), s.width-20)
 	urlHint := ""
 	if url := ev.URL(); url != "" {
 		urlHint = DetailTimeStyle.Render("  ↵ open")
