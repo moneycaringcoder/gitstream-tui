@@ -115,7 +115,7 @@ func (s *EventStream) Update(msg tea.Msg) (tuikit.Component, tea.Cmd) {
 		if msg.String() == "o" {
 			if item := s.listView.CursorItem(); item != nil {
 				if url := item.Event.URL(); url != "" {
-					OpenURL(url)
+					tuikit.OpenURL(url)
 				}
 				return s, tuikit.Consumed()
 			}
