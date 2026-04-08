@@ -12,11 +12,46 @@ A lightweight terminal dashboard for watching GitHub repository activity in real
 
 ## Install
 
+### Homebrew (macOS / Linux)
+
+```bash
+brew install moneycaringcoder/tap/gitstream
+```
+
+### Scoop (Windows)
+
+```powershell
+scoop bucket add moneycaringcoder https://github.com/moneycaringcoder/scoop-bucket
+scoop install gitstream
+```
+
+### Go
+
 ```bash
 go install github.com/moneycaringcoder/gitstream-tui/cmd/gitstream@latest
 ```
 
-Or download a binary from [Releases](https://github.com/moneycaringcoder/gitstream-tui/releases).
+Requires Go 1.24+. The binary is installed to `$GOPATH/bin` (usually `~/go/bin`).
+
+> **Note:** `go install` builds from source and does not embed version info. For automatic update checks to work correctly, use one of the other install methods or download a pre-built binary.
+
+### Pre-built binaries
+
+Download the latest release for your platform from [Releases](https://github.com/moneycaringcoder/gitstream-tui/releases). Extract and place the binary somewhere on your `PATH`.
+
+## Updating
+
+### Homebrew
+
+```bash
+brew upgrade gitstream
+```
+
+### Scoop
+
+```powershell
+scoop update gitstream
+```
 
 ## Usage
 
