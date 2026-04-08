@@ -50,6 +50,8 @@ type EventStream struct {
 
 	focused bool
 	width   int
+
+	DetailOverlay *tuikit.DetailOverlay[DisplayEvent]
 }
 
 func NewEventStream(cfg *config.Config, debugLog *DebugLog) *EventStream {
@@ -74,11 +76,6 @@ func NewEventStream(cfg *config.Config, debugLog *DebugLog) *EventStream {
 		},
 		FlashFunc: func(item DisplayEvent, now time.Time) bool {
 			return !item.AddedAt.IsZero() && now.Before(item.AddedAt.Add(flashDuration))
-		},
-		OnSelect: func(item DisplayEvent, idx int) {
-			if url := item.Event.URL(); url != "" {
-				openURL(url)
-			}
 		},
 		DetailHeight: 3,
 	})
@@ -107,6 +104,22 @@ func (s *EventStream) Init() tea.Cmd {
 func (s *EventStream) Update(msg tea.Msg) (tuikit.Component, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Enter opens detail overlay instead of browser
+		if msg.String() == "enter" && s.DetailOverlay != nil {
+			if item := s.listView.CursorItem(); item != nil {
+				s.DetailOverlay.Show(*item)
+				return s, tuikit.Consumed()
+			}
+		}
+		// 'o' opens in browser
+		if msg.String() == "o" {
+			if item := s.listView.CursorItem(); item != nil {
+				if url := item.Event.URL(); url != "" {
+					OpenURL(url)
+				}
+				return s, tuikit.Consumed()
+			}
+		}
 		cmd := s.listView.HandleKey(msg)
 		return s, cmd
 
@@ -315,7 +328,12 @@ func (s *EventStream) renderDetailBar(de DisplayEvent) string {
 }
 
 func (s *EventStream) KeyBindings() []tuikit.KeyBind {
-	return s.listView.KeyBindings()
+	bindings := s.listView.KeyBindings()
+	bindings = append(bindings,
+		tuikit.KeyBind{Key: "enter", Label: "Event detail", Group: "NAVIGATION"},
+		tuikit.KeyBind{Key: "o", Label: "Open in browser", Group: "NAVIGATION"},
+	)
+	return bindings
 }
 
 func (s *EventStream) SetSize(w, h int) {

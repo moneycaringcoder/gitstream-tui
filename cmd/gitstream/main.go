@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	tuikit "github.com/moneycaringcoder/tuikit-go"
 	"github.com/moneycaringcoder/gitstream-tui/internal/config"
 	"github.com/moneycaringcoder/gitstream-tui/internal/github"
@@ -77,6 +79,26 @@ func main() {
 	stream := ui.NewEventStream(cfg, debugLog)
 	panel := ui.NewStatusPanel()
 	debugOverlay := ui.NewDebugOverlay(debugLog)
+
+	detailOverlay := tuikit.NewDetailOverlay(tuikit.DetailOverlayOpts[ui.DisplayEvent]{
+		Title: "Event Detail",
+		Render: func(de ui.DisplayEvent, w, h int, theme tuikit.Theme) string {
+			return renderEventDetail(de, w)
+		},
+		OnKey: func(de ui.DisplayEvent, key tea.KeyMsg) tea.Cmd {
+			if key.String() == "o" {
+				if url := de.Event.URL(); url != "" {
+					ui.OpenURL(url)
+				}
+				return tuikit.Consumed()
+			}
+			return nil
+		},
+		KeyBindings: []tuikit.KeyBind{
+			{Key: "o", Label: "Open in browser", Group: "DETAIL"},
+		},
+	})
+	stream.DetailOverlay = detailOverlay
 
 	// Config editor using tuikit.ConfigEditor
 	configEditor := tuikit.NewConfigEditor([]tuikit.ConfigField{
@@ -180,6 +202,7 @@ func main() {
 		tuikit.WithHelp(),
 		tuikit.WithOverlay("Settings", "c", configEditor),
 		tuikit.WithOverlay("Debug", "D", debugOverlay),
+		tuikit.WithOverlay("Detail", "", detailOverlay),
 		// Global keybindings
 		tuikit.WithKeyBind(tuikit.KeyBind{
 			Key: "p", Label: "Pause/resume", Group: "CONTROLS",
@@ -257,8 +280,100 @@ Keybindings (in TUI):
   ?             Help
   Up/Down       Scroll
   Tab           Switch focus
-  Enter         Open in browser
+  Enter         Event detail
+  o             Open in browser
 
 Config: ~/.config/gitstream/config.yaml
 `)
+}
+
+func renderEventDetail(de ui.DisplayEvent, w int) string {
+	ev := de.Event
+	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+	valStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff"))
+	color := ui.EventColor(ev.Type)
+	typeStyle := lipgloss.NewStyle().Foreground(color).Bold(true)
+
+	lines := []string{
+		labelStyle.Render("Type:    ") + typeStyle.Render(ev.Label()),
+		labelStyle.Render("Repo:    ") + valStyle.Render(ev.Repo.Name),
+		labelStyle.Render("Actor:   ") + valStyle.Render(ev.Actor.Login),
+		labelStyle.Render("Time:    ") + valStyle.Render(ev.CreatedAt.Local().Format("2006-01-02 15:04:05")),
+	}
+
+	if url := ev.URL(); url != "" {
+		lines = append(lines, labelStyle.Render("URL:     ")+valStyle.Render(url))
+	}
+
+	lines = append(lines, "")
+
+	detail := ev.Detail()
+	if detail != "" {
+		lines = append(lines, labelStyle.Render("Detail:"))
+		// Word-wrap detail to width
+		maxW := w - 2
+		if maxW < 20 {
+			maxW = 20
+		}
+		for len(detail) > maxW {
+			lines = append(lines, "  "+valStyle.Render(detail[:maxW]))
+			detail = detail[maxW:]
+		}
+		if detail != "" {
+			lines = append(lines, "  "+valStyle.Render(detail))
+		}
+	}
+
+	// Show commits for push events
+	if len(ev.Payload.Commits) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, labelStyle.Render("Commits:"))
+		for _, c := range ev.Payload.Commits {
+			sha := c.SHA
+			if len(sha) > 7 {
+				sha = sha[:7]
+			}
+			msg := c.Message
+			if idx := strings.Index(msg, "\n"); idx > 0 {
+				msg = msg[:idx]
+			}
+			maxMsg := w - 12
+			if maxMsg > 0 && len(msg) > maxMsg {
+				msg = msg[:maxMsg-1] + "…"
+			}
+			lines = append(lines, "  "+lipgloss.NewStyle().Foreground(lipgloss.Color("#ffaa00")).Render(sha)+" "+valStyle.Render(msg))
+		}
+	}
+
+	// PR info
+	if pr := ev.Payload.PullRequest; pr != nil {
+		lines = append(lines, "")
+		lines = append(lines, labelStyle.Render("PR:      ")+valStyle.Render(fmt.Sprintf("#%d %s", pr.Number, pr.Title)))
+		lines = append(lines, labelStyle.Render("State:   ")+valStyle.Render(pr.State))
+	}
+
+	// Issue info
+	if issue := ev.Payload.Issue; issue != nil {
+		lines = append(lines, "")
+		lines = append(lines, labelStyle.Render("Issue:   ")+valStyle.Render(fmt.Sprintf("#%d %s", issue.Number, issue.Title)))
+	}
+
+	// Release info
+	if rel := ev.Payload.Release; rel != nil {
+		lines = append(lines, "")
+		lines = append(lines, labelStyle.Render("Release: ")+valStyle.Render(rel.TagName+" — "+rel.Name))
+	}
+
+	// Compare data (diff stats)
+	if cd := ev.CompareData; cd != nil {
+		lines = append(lines, "")
+		lines = append(lines, labelStyle.Render(fmt.Sprintf("Files changed: %d, Commits: %d", len(cd.Files), cd.TotalCommits)))
+		for _, f := range cd.Files {
+			adds := lipgloss.NewStyle().Foreground(lipgloss.Color("#22c55e")).Render(fmt.Sprintf("+%d", f.Additions))
+			dels := lipgloss.NewStyle().Foreground(lipgloss.Color("#ef4444")).Render(fmt.Sprintf("-%d", f.Deletions))
+			lines = append(lines, "  "+adds+" "+dels+" "+valStyle.Render(f.Filename))
+		}
+	}
+
+	return strings.Join(lines, "\n")
 }

@@ -69,8 +69,8 @@ func renderEventLine(ev github.Event, now time.Time) string {
 	return line
 }
 
-// openURL opens a URL in the default browser.
-func openURL(url string) {
+// OpenURL opens a URL in the default browser.
+func OpenURL(url string) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
