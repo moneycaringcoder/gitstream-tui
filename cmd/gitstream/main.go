@@ -13,6 +13,7 @@ import (
 	"github.com/moneycaringcoder/gitstream-tui/internal/config"
 	"github.com/moneycaringcoder/gitstream-tui/internal/github"
 	"github.com/moneycaringcoder/gitstream-tui/internal/ui"
+	"github.com/moneycaringcoder/gitstream-tui/internal/updatewire"
 )
 
 var version = "dev"
@@ -234,13 +235,7 @@ func main() {
 		}),
 		tuikit.WithMouseSupport(),
 		tuikit.WithTickInterval(time.Second),
-		tuikit.WithAutoUpdate(tuikit.UpdateConfig{
-			Owner:      "moneycaringcoder",
-			Repo:       "gitstream-tui",
-			BinaryName: "gitstream",
-			Version:    version,
-			Mode:       tuikit.UpdateNotify,
-		}),
+		tuikit.WithAutoUpdate(updatewire.New(version)),
 	)
 
 	// Register repo number filters (1-9)
