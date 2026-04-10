@@ -162,10 +162,9 @@ func TestHarness_SnapshotAfterResize(t *testing.T) {
 	h.Snapshot("resized_stream")
 }
 
-// TestHarness_SnapshotWithTabs captures a golden snapshot with the Tabs wrapper,
-// mirroring the real app layout. This catches tab bar height regressions that
-// the bare-EventStream snapshots would miss.
-func TestHarness_SnapshotWithTabs(t *testing.T) {
+// testFullApp builds a full app mirroring the real gitstream layout (Tabs + DualPane
+// + StatusBar). Reusable across tests that need the production component tree.
+func testFullApp() *blit.App {
 	cfg := testConfig()
 	debugLog := NewDebugLog()
 	stream := NewEventStream(cfg, debugLog)
@@ -177,7 +176,7 @@ func TestHarness_SnapshotWithTabs(t *testing.T) {
 		{Title: "PRs", Glyph: "⎇"},
 	}, blit.TabsOpts{})
 
-	app := blit.NewApp(
+	return blit.NewApp(
 		blit.WithLayout(&blit.DualPane{
 			Main:         tabs,
 			Side:         panel,
@@ -190,11 +189,28 @@ func TestHarness_SnapshotWithTabs(t *testing.T) {
 			func() string { return "test " },
 		),
 	)
+}
 
-	h := btest.NewHarness(t, app.Model(), 80, 20)
+// TestHarness_SnapshotWithTabs captures a golden snapshot of the full app layout
+// (Tabs + DualPane + StatusBar) using btest.SnapshotApp. This catches tab bar
+// height regressions that the bare-EventStream snapshots would miss.
+func TestHarness_SnapshotWithTabs(t *testing.T) {
+	btest.SnapshotApp(t, testFullApp(), 80, 20, "tabs_empty")
+}
+
+// TestHarness_AppResize uses NewAppHarness for an interactive test of the full
+// app layout at multiple viewport sizes.
+func TestHarness_AppResize(t *testing.T) {
+	h := btest.NewAppHarness(t, testFullApp(), 80, 20)
 	defer h.Done()
 
-	h.Snapshot("tabs_empty")
+	h.Expect("◉ All").
+		Expect("↑ Pushes").
+		Expect("gitstream")
+
+	h.Resize(60, 15).
+		Expect("gitstream").
+		Snapshot("tabs_resized")
 }
 
 // TestHarness_Resize verifies the layout adapts to terminal size changes.
