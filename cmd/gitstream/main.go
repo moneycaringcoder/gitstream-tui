@@ -88,7 +88,7 @@ func main() {
 	detailOverlay := blit.NewDetailOverlay(blit.DetailOverlayOpts[ui.DisplayEvent]{
 		Title: "Event Detail",
 		Render: func(de ui.DisplayEvent, w, h int, theme blit.Theme) string {
-			return renderEventDetail(de, w)
+			return renderEventDetail(de, w, theme)
 		},
 		OnKey: func(de ui.DisplayEvent, key tea.KeyMsg) tea.Cmd {
 			if key.String() == "o" {
@@ -293,7 +293,7 @@ Config: ~/.config/gitstream/config.yaml
 `)
 }
 
-func renderEventDetail(de ui.DisplayEvent, w int) string {
+func renderEventDetail(de ui.DisplayEvent, w int, theme blit.Theme) string {
 	ev := de.Event
 	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
 	valStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff"))
@@ -356,18 +356,33 @@ func renderEventDetail(de ui.DisplayEvent, w int) string {
 		lines = append(lines, "")
 		lines = append(lines, labelStyle.Render("PR:      ")+valStyle.Render(fmt.Sprintf("#%d %s", pr.Number, pr.Title)))
 		lines = append(lines, labelStyle.Render("State:   ")+valStyle.Render(pr.State))
+		if pr.Body != "" {
+			lines = append(lines, "")
+			lines = append(lines, labelStyle.Render("Description:"))
+			lines = append(lines, blit.Markdown(pr.Body, theme))
+		}
 	}
 
 	// Issue info
 	if issue := ev.Payload.Issue; issue != nil {
 		lines = append(lines, "")
 		lines = append(lines, labelStyle.Render("Issue:   ")+valStyle.Render(fmt.Sprintf("#%d %s", issue.Number, issue.Title)))
+		if issue.Body != "" {
+			lines = append(lines, "")
+			lines = append(lines, labelStyle.Render("Description:"))
+			lines = append(lines, blit.Markdown(issue.Body, theme))
+		}
 	}
 
 	// Release info
 	if rel := ev.Payload.Release; rel != nil {
 		lines = append(lines, "")
 		lines = append(lines, labelStyle.Render("Release: ")+valStyle.Render(rel.TagName+" — "+rel.Name))
+		if rel.Body != "" {
+			lines = append(lines, "")
+			lines = append(lines, labelStyle.Render("Release Notes:"))
+			lines = append(lines, blit.Markdown(rel.Body, theme))
+		}
 	}
 
 	// Compare data (diff stats)
