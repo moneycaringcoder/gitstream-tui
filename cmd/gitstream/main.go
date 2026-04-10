@@ -213,6 +213,89 @@ func main() {
 	}
 	updateStatusRight()
 
+	// Vim-style command bar
+	cmdBar := blit.NewCommandBar([]blit.Command{
+		{
+			Name: "add", Args: true, Hint: "Add a repo (owner/repo)",
+			Run: func(args string) tea.Cmd {
+				args = strings.TrimSpace(args)
+				if args == "" || !strings.Contains(args, "/") {
+					return nil
+				}
+				cfg.RepoEntries = append(cfg.RepoEntries, config.RepoEntry{Name: args})
+				config.Save(cfg)
+				return nil
+			},
+		},
+		{
+			Name: "remove", Aliases: []string{"rm"}, Args: true, Hint: "Remove a repo",
+			Run: func(args string) tea.Cmd {
+				args = strings.TrimSpace(args)
+				filtered := make([]config.RepoEntry, 0, len(cfg.RepoEntries))
+				for _, r := range cfg.RepoEntries {
+					if r.Name != args {
+						filtered = append(filtered, r)
+					}
+				}
+				cfg.RepoEntries = filtered
+				config.Save(cfg)
+				return nil
+			},
+		},
+		{
+			Name: "sort", Args: true, Hint: "Sort newest|oldest",
+			Run: func(args string) tea.Cmd {
+				args = strings.TrimSpace(args)
+				if args == "newest" && !stream.IsNewestFirst() {
+					stream.ToggleSort()
+					updateStatusRight()
+				} else if args == "oldest" && stream.IsNewestFirst() {
+					stream.ToggleSort()
+					updateStatusRight()
+				}
+				return nil
+			},
+		},
+		{
+			Name: "filter", Args: true, Hint: "filter repo:<name> or type:<type>",
+			Run: func(args string) tea.Cmd {
+				args = strings.TrimSpace(args)
+				if strings.HasPrefix(args, "repo:") {
+					stream.SetRepoFilter(strings.TrimPrefix(args, "repo:"))
+					updateStatusRight()
+				} else if strings.HasPrefix(args, "type:") {
+					stream.SetTypeFilter(strings.TrimPrefix(args, "type:"))
+					updateStatusRight()
+				}
+				return nil
+			},
+		},
+		{
+			Name: "clear", Hint: "Clear all filters",
+			Run: func(_ string) tea.Cmd {
+				stream.ClearFilters()
+				updateStatusRight()
+				return nil
+			},
+		},
+		{
+			Name: "theme", Args: true, Hint: "Set theme by name",
+			Run: func(args string) tea.Cmd {
+				args = strings.TrimSpace(args)
+				if t, ok := presets[args]; ok {
+					cfg.Theme = args
+					config.Save(cfg)
+					return blit.SetThemeCmd(t)
+				}
+				return nil
+			},
+		},
+		{
+			Name: "quit", Aliases: []string{"q"}, Hint: "Quit",
+			Run: func(_ string) tea.Cmd { return tea.Quit },
+		},
+	})
+
 	app := blit.NewApp(
 		blit.WithTheme(resolveTheme(cfg.Theme)),
 		blit.WithLayout(&blit.DualPane{
@@ -231,6 +314,7 @@ func main() {
 		blit.WithOverlay("Debug", "D", debugOverlay),
 		blit.WithOverlay("Detail", "", detailOverlay),
 		blit.WithOverlay("Theme", "ctrl+t", themePicker),
+		blit.WithOverlay("Command", ":", cmdBar),
 		// Global keybindings
 		blit.WithKeyBind(blit.KeyBind{
 			Key: "p", Label: "Pause/resume", Group: "CONTROLS",

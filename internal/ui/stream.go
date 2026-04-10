@@ -427,6 +427,11 @@ func (s *EventStream) SetRepoFilter(repo string) {
 	s.rebuildFiltered()
 }
 
+func (s *EventStream) SetTypeFilter(t string) {
+	s.typeFilter = t
+	s.rebuildFiltered()
+}
+
 func (s *EventStream) ClearFilters() {
 	s.filter = ""
 	s.typeFilter = ""
