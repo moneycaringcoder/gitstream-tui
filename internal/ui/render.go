@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/moneycaringcoder/gitstream-tui/internal/github"
-	tuikit "github.com/moneycaringcoder/tuikit-go"
+	blit "github.com/blitui/blit"
 )
 
 const flashDuration = 3 * time.Second
@@ -18,7 +18,7 @@ type DisplayEvent struct {
 
 func renderEventLine(ev github.Event, now time.Time) string {
 	t := ev.CreatedAt.Local().Format("15:04:05")
-	rel := tuikit.RelativeTime(ev.CreatedAt, now)
+	rel := blit.RelativeTime(ev.CreatedAt, now)
 	timeStr := fmt.Sprintf("%s %s", t, rel)
 
 	label := ev.Label()
@@ -29,7 +29,7 @@ func renderEventLine(ev github.Event, now time.Time) string {
 
 	detailRendered := DetailStyle.Render(detail)
 	if url != "" {
-		detailRendered = tuikit.OSC8Link(url, detailRendered)
+		detailRendered = blit.OSC8Link(url, detailRendered)
 	}
 
 	line := fmt.Sprintf("%s  %s %s %s %s",

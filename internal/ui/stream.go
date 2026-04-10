@@ -8,7 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	tuikit "github.com/moneycaringcoder/tuikit-go"
+	blit "github.com/blitui/blit"
 	"github.com/moneycaringcoder/gitstream-tui/internal/config"
 	"github.com/moneycaringcoder/gitstream-tui/internal/discovery"
 	"github.com/moneycaringcoder/gitstream-tui/internal/github"
@@ -29,7 +29,7 @@ var typeFilters = []string{
 }
 
 // EventStream displays a scrollable list of GitHub events.
-// Implements tuikit.Component.
+// Implements blit.Component.
 type EventStream struct {
 	cfg      *config.Config
 	debugLog *DebugLog
@@ -38,8 +38,8 @@ type EventStream struct {
 	seen          map[string]bool
 	seenLocalSHAs map[string]bool
 
-	listView *tuikit.ListView[DisplayEvent]
-	poller   *tuikit.Poller
+	listView *blit.ListView[DisplayEvent]
+	poller   *blit.Poller
 
 	filter     string // repo name filter
 	typeFilter string // event type filter
@@ -51,7 +51,7 @@ type EventStream struct {
 	focused bool
 	width   int
 
-	DetailOverlay *tuikit.DetailOverlay[DisplayEvent]
+	DetailOverlay *blit.DetailOverlay[DisplayEvent]
 }
 
 func NewEventStream(cfg *config.Config, debugLog *DebugLog) *EventStream {
@@ -64,14 +64,14 @@ func NewEventStream(cfg *config.Config, debugLog *DebugLog) *EventStream {
 		knownRepos:    append([]string{}, cfg.Repos()...),
 	}
 
-	s.listView = tuikit.NewListView(tuikit.ListViewOpts[DisplayEvent]{
-		RenderItem: func(item DisplayEvent, idx int, isCursor bool, theme tuikit.Theme) string {
+	s.listView = blit.NewListView(blit.ListViewOpts[DisplayEvent]{
+		RenderItem: func(item DisplayEvent, idx int, isCursor bool, theme blit.Theme) string {
 			return renderEventLine(item.Event, time.Now())
 		},
-		HeaderFunc: func(theme tuikit.Theme) string {
+		HeaderFunc: func(theme blit.Theme) string {
 			return s.renderHeader()
 		},
-		DetailFunc: func(item DisplayEvent, theme tuikit.Theme) string {
+		DetailFunc: func(item DisplayEvent, theme blit.Theme) string {
 			return s.renderDetailBar(item, theme)
 		},
 		FlashFunc: func(item DisplayEvent, now time.Time) bool {
@@ -80,7 +80,7 @@ func NewEventStream(cfg *config.Config, debugLog *DebugLog) *EventStream {
 		DetailHeight: 3,
 	})
 
-	s.poller = tuikit.NewPoller(
+	s.poller = blit.NewPoller(
 		time.Duration(cfg.Interval)*time.Second,
 		func() tea.Cmd {
 			cmds := []tea.Cmd{pollEvents(cfg, debugLog, false)}
@@ -101,29 +101,29 @@ func (s *EventStream) Init() tea.Cmd {
 	)
 }
 
-func (s *EventStream) Update(msg tea.Msg) (tuikit.Component, tea.Cmd) {
+func (s *EventStream) Update(msg tea.Msg, ctx blit.Context) (blit.Component, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		// Enter opens detail overlay instead of browser
 		if msg.String() == "enter" && s.DetailOverlay != nil {
 			if item := s.listView.CursorItem(); item != nil {
 				s.DetailOverlay.Show(*item)
-				return s, tuikit.Consumed()
+				return s, blit.Consumed()
 			}
 		}
 		// 'o' opens in browser
 		if msg.String() == "o" {
 			if item := s.listView.CursorItem(); item != nil {
 				if url := item.Event.URL(); url != "" {
-					tuikit.OpenURL(url)
+					blit.OpenURL(url)
 				}
-				return s, tuikit.Consumed()
+				return s, blit.Consumed()
 			}
 		}
 		cmd := s.listView.HandleKey(msg)
 		return s, cmd
 
-	case tuikit.TickMsg:
+	case blit.TickMsg:
 		s.listView.Refresh()
 		s.poller.SetInterval(time.Duration(s.cfg.Interval) * time.Second)
 
@@ -155,7 +155,7 @@ func (s *EventStream) Update(msg tea.Msg) (tuikit.Component, tea.Cmd) {
 	return s, nil
 }
 
-func (s *EventStream) handleEvents(msg eventsMsg) (tuikit.Component, tea.Cmd) {
+func (s *EventStream) handleEvents(msg eventsMsg) (blit.Component, tea.Cmd) {
 	for _, e := range msg.errors {
 		s.debugLog.Error("%s", e)
 	}
@@ -193,7 +193,7 @@ func (s *EventStream) handleEvents(msg eventsMsg) (tuikit.Component, tea.Cmd) {
 	return s, nil
 }
 
-func (s *EventStream) handleGitStatus(msg gitStatusMsg) (tuikit.Component, tea.Cmd) {
+func (s *EventStream) handleGitStatus(msg gitStatusMsg) (blit.Component, tea.Cmd) {
 	now := time.Now()
 	newLocal := 0
 	for _, st := range msg.statuses {
@@ -293,9 +293,9 @@ func (s *EventStream) renderHeader() string {
 	return lipgloss.JoinVertical(lipgloss.Left, title, repoList, status, "")
 }
 
-func (s *EventStream) renderDetailBar(de DisplayEvent, theme tuikit.Theme) string {
+func (s *EventStream) renderDetailBar(de DisplayEvent, theme blit.Theme) string {
 	ev := de.Event
-	divider := tuikit.Divider(s.width, theme)
+	divider := blit.Divider(s.width, theme)
 
 	repo := ev.Repo.Name
 	label := ev.Label()
@@ -310,7 +310,7 @@ func (s *EventStream) renderDetailBar(de DisplayEvent, theme tuikit.Theme) strin
 		DetailTimeStyle.Render(t),
 	)
 
-	detail := tuikit.Truncate(ev.Detail(), s.width-20)
+	detail := blit.Truncate(ev.Detail(), s.width-20)
 	urlHint := ""
 	if url := ev.URL(); url != "" {
 		urlHint = DetailTimeStyle.Render("  ↵ open")
@@ -320,11 +320,11 @@ func (s *EventStream) renderDetailBar(de DisplayEvent, theme tuikit.Theme) strin
 	return divider + "\n" + line1 + "\n" + line2
 }
 
-func (s *EventStream) KeyBindings() []tuikit.KeyBind {
+func (s *EventStream) KeyBindings() []blit.KeyBind {
 	bindings := s.listView.KeyBindings()
 	bindings = append(bindings,
-		tuikit.KeyBind{Key: "enter", Label: "Event detail", Group: "NAVIGATION"},
-		tuikit.KeyBind{Key: "o", Label: "Open in browser", Group: "NAVIGATION"},
+		blit.KeyBind{Key: "enter", Label: "Event detail", Group: "NAVIGATION"},
+		blit.KeyBind{Key: "o", Label: "Open in browser", Group: "NAVIGATION"},
 	)
 	return bindings
 }

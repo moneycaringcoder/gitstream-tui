@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	tuikit "github.com/moneycaringcoder/tuikit-go"
+	blit "github.com/blitui/blit"
 	"github.com/moneycaringcoder/gitstream-tui/internal/gitstatus"
 )
 
@@ -16,18 +16,18 @@ type panelLine struct {
 }
 
 // StatusPanel displays local repo git status.
-// Implements tuikit.Component.
+// Implements blit.Component.
 type StatusPanel struct {
 	repoStatus []gitstatus.RepoStatus
-	listView   *tuikit.ListView[panelLine]
+	listView   *blit.ListView[panelLine]
 	focused    bool
 	width      int
 }
 
 func NewStatusPanel() *StatusPanel {
 	p := &StatusPanel{}
-	p.listView = tuikit.NewListView(tuikit.ListViewOpts[panelLine]{
-		RenderItem: func(item panelLine, idx int, isCursor bool, theme tuikit.Theme) string {
+	p.listView = blit.NewListView(blit.ListViewOpts[panelLine]{
+		RenderItem: func(item panelLine, idx int, isCursor bool, theme blit.Theme) string {
 			return item.text
 		},
 	})
@@ -36,7 +36,7 @@ func NewStatusPanel() *StatusPanel {
 
 func (p *StatusPanel) Init() tea.Cmd { return nil }
 
-func (p *StatusPanel) Update(msg tea.Msg) (tuikit.Component, tea.Cmd) {
+func (p *StatusPanel) Update(msg tea.Msg, ctx blit.Context) (blit.Component, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		cmd := p.listView.HandleKey(msg)
@@ -53,8 +53,8 @@ func (p *StatusPanel) View() string {
 	return p.listView.View()
 }
 
-func (p *StatusPanel) KeyBindings() []tuikit.KeyBind {
-	return []tuikit.KeyBind{
+func (p *StatusPanel) KeyBindings() []blit.KeyBind {
+	return []blit.KeyBind{
 		{Key: "up/k", Label: "Scroll up", Group: "NAVIGATION"},
 		{Key: "down/j", Label: "Scroll down", Group: "NAVIGATION"},
 	}

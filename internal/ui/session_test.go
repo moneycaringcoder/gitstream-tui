@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/moneycaringcoder/tuikit-go/tuitest"
+	"github.com/blitui/blit/btest"
 )
 
 // Session tests: record a scripted flow, save it to testdata/sessions,
@@ -21,21 +21,21 @@ func sessionPath(name string) string {
 	return filepath.Join(sessionsDir, name+".tuisess")
 }
 
-func recordAndVerify(t *testing.T, name string, play func(r *tuitest.SessionRecorder)) {
+func recordAndVerify(t *testing.T, name string, play func(r *btest.SessionRecorder)) {
 	t.Helper()
 	path := sessionPath(name)
 	force := os.Getenv("GITSTREAM_UPDATE_SESSIONS") == "1"
 
 	if _, err := os.Stat(path); force || os.IsNotExist(err) {
 		tm, _ := testApp(t, testEvents())
-		rec := tuitest.NewSessionRecorder(tm)
+		rec := btest.NewSessionRecorder(tm)
 		play(rec)
 		if err := rec.Save(path); err != nil {
 			t.Fatalf("save %s: %v", name, err)
 		}
 	}
 
-	sess, err := tuitest.LoadSession(path)
+	sess, err := btest.LoadSession(path)
 	if err != nil {
 		t.Fatalf("load %s: %v", name, err)
 	}
@@ -50,7 +50,7 @@ func recordAndVerify(t *testing.T, name string, play func(r *tuitest.SessionReco
 // TestSession_RepoFeed covers the primary navigation flow: land on the
 // event stream, move the cursor down, and return to the top.
 func TestSession_RepoFeed(t *testing.T) {
-	recordAndVerify(t, "repo_feed", func(r *tuitest.SessionRecorder) {
+	recordAndVerify(t, "repo_feed", func(r *btest.SessionRecorder) {
 		r.Key("down").Key("down").Key("up")
 	})
 }
@@ -58,7 +58,7 @@ func TestSession_RepoFeed(t *testing.T) {
 // TestSession_TypeFilter covers the filter cycling flow: advance through
 // two type filters and clear back to the default.
 func TestSession_TypeFilter(t *testing.T) {
-	recordAndVerify(t, "type_filter", func(r *tuitest.SessionRecorder) {
+	recordAndVerify(t, "type_filter", func(r *btest.SessionRecorder) {
 		r.Key("t").Key("t").Key("0")
 	})
 }

@@ -7,11 +7,11 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	tuikit "github.com/moneycaringcoder/tuikit-go"
+	blit "github.com/blitui/blit"
 )
 
 // DebugOverlay shows API stats and recent log entries.
-// Implements tuikit.Overlay.
+// Implements blit.Overlay.
 type DebugOverlay struct {
 	debugLog *DebugLog
 	active   bool
@@ -26,7 +26,7 @@ func NewDebugOverlay(debugLog *DebugLog) *DebugOverlay {
 
 func (d *DebugOverlay) Init() tea.Cmd { return nil }
 
-func (d *DebugOverlay) Update(msg tea.Msg) (tuikit.Component, tea.Cmd) {
+func (d *DebugOverlay) Update(msg tea.Msg, ctx blit.Context) (blit.Component, tea.Cmd) {
 	return d, nil
 }
 
@@ -94,8 +94,8 @@ func (d *DebugOverlay) View() string {
 	return b.String()
 }
 
-func (d *DebugOverlay) KeyBindings() []tuikit.KeyBind {
-	return []tuikit.KeyBind{
+func (d *DebugOverlay) KeyBindings() []blit.KeyBind {
+	return []blit.KeyBind{
 		{Key: "D", Label: "Debug log", Group: "OTHER"},
 	}
 }

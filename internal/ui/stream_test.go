@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	tuikit "github.com/moneycaringcoder/tuikit-go"
-	"github.com/moneycaringcoder/tuikit-go/tuitest"
+	blit "github.com/blitui/blit"
+	"github.com/blitui/blit/btest"
 	"github.com/moneycaringcoder/gitstream-tui/internal/config"
 	"github.com/moneycaringcoder/gitstream-tui/internal/github"
 )
@@ -52,29 +52,29 @@ func testEvents() []github.Event {
 	}
 }
 
-// testApp builds a tuikit.App wrapping an EventStream with injected events.
-func testApp(t testing.TB, events []github.Event) (*tuitest.TestModel, *EventStream) {
+// testApp builds a blit.App wrapping an EventStream with injected events.
+func testApp(t testing.TB, events []github.Event) (*btest.TestModel, *EventStream) {
 	t.Helper()
 	cfg := testConfig()
 	debugLog := NewDebugLog()
 	stream := NewEventStream(cfg, debugLog)
 	panel := NewStatusPanel()
 
-	app := tuikit.NewApp(
-		tuikit.WithLayout(&tuikit.DualPane{
+	app := blit.NewApp(
+		blit.WithLayout(&blit.DualPane{
 			Main:         stream,
 			Side:         panel,
 			SideWidth:    32,
 			MinMainWidth: 40,
 			SideRight:    true,
 		}),
-		tuikit.WithStatusBar(
+		blit.WithStatusBar(
 			func() string { return " test status left" },
 			func() string { return "test status right " },
 		),
 	)
 
-	tm := tuitest.NewTestModel(t, app.Model(), 120, 40)
+	tm := btest.NewTestModel(t, app.Model(), 120, 40)
 
 	// Inject events directly
 	if len(events) > 0 {
@@ -88,20 +88,20 @@ func TestStreamRendersEvents(t *testing.T) {
 	tm, _ := testApp(t, testEvents())
 	s := tm.Screen()
 
-	tuitest.AssertContains(t, s, "alice")
-	tuitest.AssertContains(t, s, "bob")
-	tuitest.AssertContains(t, s, "charlie")
-	tuitest.AssertContains(t, s, "repo-a")
-	tuitest.AssertContains(t, s, "repo-b")
+	btest.AssertContains(t, s, "alice")
+	btest.AssertContains(t, s, "bob")
+	btest.AssertContains(t, s, "charlie")
+	btest.AssertContains(t, s, "repo-a")
+	btest.AssertContains(t, s, "repo-b")
 }
 
 func TestStreamRendersHeader(t *testing.T) {
 	tm, _ := testApp(t, testEvents())
 	s := tm.Screen()
 
-	tuitest.AssertContains(t, s, "gitstream")
-	tuitest.AssertContains(t, s, "owner/repo-a")
-	tuitest.AssertContains(t, s, "owner/repo-b")
+	btest.AssertContains(t, s, "gitstream")
+	btest.AssertContains(t, s, "owner/repo-a")
+	btest.AssertContains(t, s, "owner/repo-b")
 }
 
 func TestStreamCursorNavigation(t *testing.T) {
@@ -113,8 +113,8 @@ func TestStreamCursorNavigation(t *testing.T) {
 
 	s := tm.Screen()
 	// Should still render all events
-	tuitest.AssertContains(t, s, "alice")
-	tuitest.AssertContains(t, s, "charlie")
+	btest.AssertContains(t, s, "alice")
+	btest.AssertContains(t, s, "charlie")
 }
 
 func TestStreamSortToggle(t *testing.T) {
@@ -133,7 +133,7 @@ func TestStreamSortToggle(t *testing.T) {
 		t.Error("should be newest first after toggle")
 	}
 	// Events should still render
-	tuitest.AssertContains(t, s, "alice")
+	btest.AssertContains(t, s, "alice")
 }
 
 func TestStreamTypeFilter(t *testing.T) {
@@ -145,7 +145,7 @@ func TestStreamTypeFilter(t *testing.T) {
 	stream.CycleTypeFilter(true) // -> PushEvent
 
 	s := tm.Screen()
-	tuitest.AssertContains(t, s, "alice") // alice has PushEvent
+	btest.AssertContains(t, s, "alice") // alice has PushEvent
 	// bob's PR event should be filtered out
 	if s.Contains("bob") {
 		t.Error("bob's PullRequestEvent should be filtered when type=PushEvent")
@@ -158,7 +158,7 @@ func TestStreamRepoFilter(t *testing.T) {
 	stream.SetRepoFilter("repo-b")
 
 	s := tm.Screen()
-	tuitest.AssertContains(t, s, "bob") // bob is in repo-b
+	btest.AssertContains(t, s, "bob") // bob is in repo-b
 	// alice and charlie are in repo-a, should be hidden
 	if s.Contains("alice") {
 		t.Error("alice should be filtered out when repo=repo-b")
@@ -201,8 +201,8 @@ func TestStreamEmptyState(t *testing.T) {
 	s := tm.Screen()
 
 	// Should still render header
-	tuitest.AssertContains(t, s, "gitstream")
-	tuitest.AssertNotEmpty(t, s)
+	btest.AssertContains(t, s, "gitstream")
+	btest.AssertNotEmpty(t, s)
 }
 
 func TestStreamResize(t *testing.T) {
@@ -211,12 +211,12 @@ func TestStreamResize(t *testing.T) {
 	// Resize to small
 	tm.SendResize(60, 20)
 	s := tm.Screen()
-	tuitest.AssertNotEmpty(t, s)
-	tuitest.AssertContains(t, s, "gitstream")
+	btest.AssertNotEmpty(t, s)
+	btest.AssertContains(t, s, "gitstream")
 
 	// Resize to large
 	tm.SendResize(200, 50)
 	s = tm.Screen()
-	tuitest.AssertNotEmpty(t, s)
-	tuitest.AssertContains(t, s, "alice")
+	btest.AssertNotEmpty(t, s)
+	btest.AssertContains(t, s, "alice")
 }

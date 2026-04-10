@@ -9,7 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	tuikit "github.com/moneycaringcoder/tuikit-go"
+	blit "github.com/blitui/blit"
 	"github.com/moneycaringcoder/gitstream-tui/internal/config"
 	"github.com/moneycaringcoder/gitstream-tui/internal/github"
 	"github.com/moneycaringcoder/gitstream-tui/internal/ui"
@@ -78,35 +78,35 @@ func main() {
 		os.Exit(1)
 	}
 
-	tuikit.CleanupOldBinary()
+	blit.CleanupOldBinary()
 
 	debugLog := ui.NewDebugLog()
 	stream := ui.NewEventStream(cfg, debugLog)
 	panel := ui.NewStatusPanel()
 	debugOverlay := ui.NewDebugOverlay(debugLog)
 
-	detailOverlay := tuikit.NewDetailOverlay(tuikit.DetailOverlayOpts[ui.DisplayEvent]{
+	detailOverlay := blit.NewDetailOverlay(blit.DetailOverlayOpts[ui.DisplayEvent]{
 		Title: "Event Detail",
-		Render: func(de ui.DisplayEvent, w, h int, theme tuikit.Theme) string {
+		Render: func(de ui.DisplayEvent, w, h int, theme blit.Theme) string {
 			return renderEventDetail(de, w)
 		},
 		OnKey: func(de ui.DisplayEvent, key tea.KeyMsg) tea.Cmd {
 			if key.String() == "o" {
 				if url := de.Event.URL(); url != "" {
-					tuikit.OpenURL(url)
+					blit.OpenURL(url)
 				}
-				return tuikit.Consumed()
+				return blit.Consumed()
 			}
 			return nil
 		},
-		KeyBindings: []tuikit.KeyBind{
+		KeyBindings: []blit.KeyBind{
 			{Key: "o", Label: "Open in browser", Group: "DETAIL"},
 		},
 	})
 	stream.DetailOverlay = detailOverlay
 
-	// Config editor using tuikit.ConfigEditor
-	configEditor := tuikit.NewConfigEditor([]tuikit.ConfigField{
+	// Config editor using blit.ConfigEditor
+	configEditor := blit.NewConfigEditor([]blit.ConfigField{
 		{
 			Label: "Interval (sec)",
 			Group: "Polling",
@@ -191,9 +191,9 @@ func main() {
 		return strings.Join(parts, "  ") + " "
 	}
 
-	app := tuikit.NewApp(
-		tuikit.WithTheme(tuikit.DefaultTheme()),
-		tuikit.WithLayout(&tuikit.DualPane{
+	app := blit.NewApp(
+		blit.WithTheme(blit.DefaultTheme()),
+		blit.WithLayout(&blit.DualPane{
 			Main:         stream,
 			Side:         panel,
 			MainName:     "Stream",
@@ -203,45 +203,45 @@ func main() {
 			SideRight:    true,
 			ToggleKey:    "",
 		}),
-		tuikit.WithStatusBar(statusLeft, statusRight),
-		tuikit.WithHelp(),
-		tuikit.WithOverlay("Settings", "c", configEditor),
-		tuikit.WithOverlay("Debug", "D", debugOverlay),
-		tuikit.WithOverlay("Detail", "", detailOverlay),
+		blit.WithStatusBar(statusLeft, statusRight),
+		blit.WithHelp(),
+		blit.WithOverlay("Settings", "c", configEditor),
+		blit.WithOverlay("Debug", "D", debugOverlay),
+		blit.WithOverlay("Detail", "", detailOverlay),
 		// Global keybindings
-		tuikit.WithKeyBind(tuikit.KeyBind{
+		blit.WithKeyBind(blit.KeyBind{
 			Key: "p", Label: "Pause/resume", Group: "CONTROLS",
 			Handler: func() { stream.TogglePause() },
 		}),
-		tuikit.WithKeyBind(tuikit.KeyBind{
+		blit.WithKeyBind(blit.KeyBind{
 			Key: "r", Label: "Refresh now", Group: "CONTROLS",
 			Handler: func() { stream.ForceRefresh() },
 		}),
-		tuikit.WithKeyBind(tuikit.KeyBind{
+		blit.WithKeyBind(blit.KeyBind{
 			Key: "s", Label: "Toggle sort", Group: "CONTROLS",
 			Handler: func() { stream.ToggleSort() },
 		}),
-		tuikit.WithKeyBind(tuikit.KeyBind{
+		blit.WithKeyBind(blit.KeyBind{
 			Key: "t", Label: "Type filter →", Group: "FILTER",
 			Handler: func() { stream.CycleTypeFilter(true) },
 		}),
-		tuikit.WithKeyBind(tuikit.KeyBind{
+		blit.WithKeyBind(blit.KeyBind{
 			Key: "T", Label: "Type filter ←", Group: "FILTER",
 			Handler: func() { stream.CycleTypeFilter(false) },
 		}),
-		tuikit.WithKeyBind(tuikit.KeyBind{
+		blit.WithKeyBind(blit.KeyBind{
 			Key: "0", Label: "Clear filters", Group: "FILTER",
 			Handler: func() { stream.ClearFilters() },
 		}),
-		tuikit.WithMouseSupport(),
-		tuikit.WithTickInterval(time.Second),
-		tuikit.WithAutoUpdate(updatewire.New(version)),
+		blit.WithMouseSupport(),
+		blit.WithTickInterval(time.Second),
+		blit.WithAutoUpdate(updatewire.New(version)),
 	)
 
 	// Register repo number filters (1-9)
 	for i := 1; i <= 9; i++ {
 		idx := i - 1
-		app.AddKeyBind(tuikit.KeyBind{
+		app.AddKeyBind(blit.KeyBind{
 			Key: fmt.Sprintf("%d", i), Label: fmt.Sprintf("Filter repo %d", i), Group: "FILTER",
 			Handler: func() {
 				repos := cfg.Repos()
