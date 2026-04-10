@@ -334,7 +334,8 @@ func main() {
 		},
 	})
 
-	app := blit.NewApp(
+	var app *blit.App
+	app = blit.NewApp(
 		blit.WithTheme(resolveTheme(cfg.Theme)),
 		blit.WithLayout(&blit.DualPane{
 			Main:         tabs,
@@ -348,38 +349,79 @@ func main() {
 		}),
 		blit.WithStatusBarSignal(leftSig, rightSig),
 		blit.WithHelp(),
-		blit.WithOverlay("Settings", "c", configEditor),
-		blit.WithOverlay("Debug", "D", debugOverlay),
-		blit.WithOverlay("Detail", "", detailOverlay),
-		blit.WithOverlay("Theme", "ctrl+t", themePicker),
-		blit.WithOverlay("Command", ":", cmdBar),
+		blit.WithSlotOverlay("Settings", "c", configEditor),
+		blit.WithSlotOverlay("Debug", "D", debugOverlay),
+		blit.WithSlotOverlay("Detail", "", detailOverlay),
+		blit.WithSlotOverlay("Theme", "ctrl+t", themePicker),
+		blit.WithSlotOverlay("Command", ":", cmdBar),
 		// Global keybindings
 		blit.WithKeyBind(blit.KeyBind{
 			Key: "p", Label: "Pause/resume", Group: "CONTROLS",
-			Handler: func() { stream.TogglePause(); updateStatusRight() },
+			Handler: func() {
+				stream.TogglePause()
+				updateStatusRight()
+				if stream.IsPaused() {
+					app.Send(blit.ToastMsg{Severity: blit.SeverityInfo, Title: "Paused", Duration: 3 * time.Second})
+				} else {
+					app.Send(blit.ToastMsg{Severity: blit.SeverityInfo, Title: "Resumed", Duration: 3 * time.Second})
+				}
+			},
 		}),
 		blit.WithKeyBind(blit.KeyBind{
 			Key: "r", Label: "Refresh now", Group: "CONTROLS",
-			Handler: func() { stream.ForceRefresh() },
+			Handler: func() {
+				stream.ForceRefresh()
+				app.Send(blit.ToastMsg{Severity: blit.SeverityInfo, Title: "Refreshing…", Duration: 3 * time.Second})
+			},
 		}),
 		blit.WithKeyBind(blit.KeyBind{
 			Key: "s", Label: "Toggle sort", Group: "CONTROLS",
-			Handler: func() { stream.ToggleSort(); updateStatusRight() },
+			Handler: func() {
+				stream.ToggleSort()
+				updateStatusRight()
+				if stream.IsNewestFirst() {
+					app.Send(blit.ToastMsg{Severity: blit.SeverityInfo, Title: "Newest first", Duration: 3 * time.Second})
+				} else {
+					app.Send(blit.ToastMsg{Severity: blit.SeverityInfo, Title: "Oldest first", Duration: 3 * time.Second})
+				}
+			},
 		}),
 		blit.WithKeyBind(blit.KeyBind{
 			Key: "t", Label: "Type filter →", Group: "FILTER",
-			Handler: func() { stream.CycleTypeFilter(true); updateStatusRight() },
+			Handler: func() {
+				stream.CycleTypeFilter(true)
+				updateStatusRight()
+				if f := stream.TypeFilter(); f != "" {
+					ev := github.Event{Type: f}
+					app.Send(blit.ToastMsg{Severity: blit.SeverityInfo, Title: "Filter: " + ev.Label(), Duration: 3 * time.Second})
+				} else {
+					app.Send(blit.ToastMsg{Severity: blit.SeverityInfo, Title: "Filter: All", Duration: 3 * time.Second})
+				}
+			},
 		}),
 		blit.WithKeyBind(blit.KeyBind{
 			Key: "T", Label: "Type filter ←", Group: "FILTER",
-			Handler: func() { stream.CycleTypeFilter(false); updateStatusRight() },
+			Handler: func() {
+				stream.CycleTypeFilter(false)
+				updateStatusRight()
+				if f := stream.TypeFilter(); f != "" {
+					ev := github.Event{Type: f}
+					app.Send(blit.ToastMsg{Severity: blit.SeverityInfo, Title: "Filter: " + ev.Label(), Duration: 3 * time.Second})
+				} else {
+					app.Send(blit.ToastMsg{Severity: blit.SeverityInfo, Title: "Filter: All", Duration: 3 * time.Second})
+				}
+			},
 		}),
 		blit.WithKeyBind(blit.KeyBind{
 			Key: "0", Label: "Clear filters", Group: "FILTER",
-			Handler: func() { stream.ClearFilters(); updateStatusRight() },
+			Handler: func() {
+				stream.ClearFilters()
+				updateStatusRight()
+				app.Send(blit.ToastMsg{Severity: blit.SeverityInfo, Title: "Filters cleared", Duration: 3 * time.Second})
+			},
 		}),
 		blit.WithMouseSupport(),
-		blit.WithTickInterval(time.Second),
+		blit.WithTickInterval(200*time.Millisecond),
 		blit.WithAutoUpdate(updatewire.New(version)),
 		blit.WithDevConsole(),
 		blit.WithAnimations(true),
