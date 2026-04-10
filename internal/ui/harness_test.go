@@ -106,6 +106,62 @@ func TestHarness_EventTypes(t *testing.T) {
 		Expect("ISSUE")
 }
 
+// TestHarness_SnapshotEmptyStream captures a golden snapshot of the empty state
+// (no events injected), which has no dynamic timestamps.
+func TestHarness_SnapshotEmptyStream(t *testing.T) {
+	cfg := testConfig()
+	debugLog := NewDebugLog()
+	stream := NewEventStream(cfg, debugLog)
+	panel := NewStatusPanel()
+
+	app := blit.NewApp(
+		blit.WithLayout(&blit.DualPane{
+			Main:         stream,
+			Side:         panel,
+			SideWidth:    32,
+			MinMainWidth: 40,
+			SideRight:    true,
+		}),
+		blit.WithStatusBar(
+			func() string { return " test" },
+			func() string { return "test " },
+		),
+	)
+
+	h := btest.NewHarness(t, app.Model(), 80, 20)
+	defer h.Done()
+
+	h.Snapshot("empty_stream")
+}
+
+// TestHarness_SnapshotAfterResize captures a snapshot at a smaller viewport.
+func TestHarness_SnapshotAfterResize(t *testing.T) {
+	cfg := testConfig()
+	debugLog := NewDebugLog()
+	stream := NewEventStream(cfg, debugLog)
+	panel := NewStatusPanel()
+
+	app := blit.NewApp(
+		blit.WithLayout(&blit.DualPane{
+			Main:         stream,
+			Side:         panel,
+			SideWidth:    32,
+			MinMainWidth: 40,
+			SideRight:    true,
+		}),
+		blit.WithStatusBar(
+			func() string { return " test" },
+			func() string { return "test " },
+		),
+	)
+
+	h := btest.NewHarness(t, app.Model(), 80, 20)
+	defer h.Done()
+
+	h.Resize(60, 15)
+	h.Snapshot("resized_stream")
+}
+
 // TestHarness_Resize verifies the layout adapts to terminal size changes.
 func TestHarness_Resize(t *testing.T) {
 	cfg := testConfig()

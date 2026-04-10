@@ -539,12 +539,22 @@ func renderEventDetail(de ui.DisplayEvent, w int, theme blit.Theme) string {
 }
 
 func resolveTheme(name string) blit.Theme {
-	if name == "" {
-		return blit.DefaultTheme()
+	if name != "" {
+		presets := blit.Presets()
+		if t, ok := presets[name]; ok {
+			return t
+		}
 	}
-	presets := blit.Presets()
-	if t, ok := presets[name]; ok {
-		return t
+	t := blit.DefaultTheme()
+	t.Extra = map[string]lipgloss.Color{
+		"info":    "#06b6d4",
+		"create":  "#22c55e",
+		"delete":  "#ef4444",
+		"review":  "#a855f7",
+		"comment": "#6b7280",
+		"issue":   "#eab308",
+		"release": "#f97316",
+		"local":   "#a78bfa",
 	}
-	return blit.DefaultTheme()
+	return t
 }
