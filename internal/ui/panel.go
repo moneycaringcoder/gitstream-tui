@@ -22,10 +22,15 @@ type StatusPanel struct {
 	listView   *blit.ListView[panelLine]
 	focused    bool
 	width      int
+	sections   map[string]*blit.CollapsibleSection
+	headerMap  map[int]string // line index → repo remote
 }
 
 func NewStatusPanel() *StatusPanel {
-	p := &StatusPanel{}
+	p := &StatusPanel{
+		sections:  make(map[string]*blit.CollapsibleSection),
+		headerMap: make(map[int]string),
+	}
 	p.listView = blit.NewListView(blit.ListViewOpts[panelLine]{
 		RenderItem: func(item panelLine, idx int, isCursor bool, theme blit.Theme) string {
 			return item.text
@@ -39,6 +44,16 @@ func (p *StatusPanel) Init() tea.Cmd { return nil }
 func (p *StatusPanel) Update(msg tea.Msg, ctx blit.Context) (blit.Component, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if msg.String() == "enter" || msg.String() == " " {
+			idx := p.listView.CursorIndex()
+			if remote, ok := p.headerMap[idx]; ok {
+				if sec, ok := p.sections[remote]; ok {
+					sec.Toggle()
+					p.rebuildContent()
+					return p, nil
+				}
+			}
+		}
 		cmd := p.listView.HandleKey(msg)
 		return p, cmd
 	case gitStatusMsg:
@@ -57,6 +72,7 @@ func (p *StatusPanel) KeyBindings() []blit.KeyBind {
 	return []blit.KeyBind{
 		{Key: "up/k", Label: "Scroll up", Group: "NAVIGATION"},
 		{Key: "down/j", Label: "Scroll down", Group: "NAVIGATION"},
+		{Key: "enter/space", Label: "Toggle section", Group: "NAVIGATION"},
 	}
 }
 
@@ -73,6 +89,7 @@ func (p *StatusPanel) SetFocused(f bool) {
 
 func (p *StatusPanel) rebuildContent() {
 	var lines []panelLine
+	p.headerMap = make(map[int]string)
 
 	if len(p.repoStatus) == 0 {
 		lines = append(lines, panelLine{text: ""})
@@ -89,61 +106,76 @@ func (p *StatusPanel) rebuildContent() {
 			short = s.Remote[i+1:]
 		}
 
-		if s.Error != nil {
-			lines = append(lines, panelLine{text: PanelRepoStyle.Render("◆ " + short)})
-			lines = append(lines, panelLine{text: PanelDimStyle.Render("  error")})
-			lines = append(lines, panelLine{text: ""})
-			continue
+		// Get or create collapsible section for this repo.
+		sec, ok := p.sections[s.Remote]
+		if !ok {
+			sec = blit.NewCollapsibleSection(short)
+			// Default: collapse clean repos, expand dirty repos.
+			sec.Collapsed = (s.Uncommitted == 0 && s.Unpushed == 0 && s.Error == nil)
+			p.sections[s.Remote] = sec
 		}
 
-		lines = append(lines, panelLine{text: PanelRepoStyle.Render("◆ " + short)})
-		lines = append(lines, panelLine{text: PanelDimStyle.Render(fmt.Sprintf("  ᛘ %s", s.Branch))})
-
-		if s.Uncommitted == 0 && s.Unpushed == 0 {
-			lines = append(lines, panelLine{text: PanelCleanStyle.Render("  ✓ clean")})
-		} else {
-			if s.Uncommitted > 0 {
-				lines = append(lines, panelLine{text: PanelDirtyStyle.Render(
-					fmt.Sprintf("  ● %d uncommitted", s.Uncommitted))})
-			}
-			if s.Unpushed > 0 {
-				lines = append(lines, panelLine{text: PanelWarnStyle.Render(
-					fmt.Sprintf("  ↑ %d unpushed", s.Unpushed))})
-				for _, c := range s.UnpushedCommits {
-					msg := c.Message
-					maxLen := p.width - 10
-					if maxLen < 10 {
-						maxLen = 10
-					}
-					if len(msg) > maxLen {
-						msg = msg[:maxLen-1] + "…"
-					}
-					lines = append(lines, panelLine{text: PanelDimStyle.Render(
-						fmt.Sprintf("    %s %s", c.SHA, msg))})
-				}
-			}
+		// Header line with collapse indicator.
+		indicator := "▼"
+		if sec.Collapsed {
+			indicator = "▶"
 		}
-		if !s.HasUpstream {
-			lines = append(lines, panelLine{text: PanelDimStyle.Render("  ⚠ no upstream")})
-		}
+		p.headerMap[len(lines)] = s.Remote
+		lines = append(lines, panelLine{text: PanelRepoStyle.Render(indicator + " " + short)})
 
-		if s.CI != nil {
-			var ciLine string
-			switch s.CI.Conclusion {
-			case "success":
-				ciLine = PanelCleanStyle.Render("  ✓ CI passed")
-			case "failure":
-				ciLine = PanelCIFailStyle.Render("  ✗ CI failed")
-			case "cancelled":
-				ciLine = PanelDimStyle.Render("  ○ CI cancelled")
-			default:
-				if s.CI.Status == "in_progress" {
-					ciLine = PanelWarnStyle.Render("  ◌ CI running")
+		if !sec.Collapsed {
+			if s.Error != nil {
+				lines = append(lines, panelLine{text: PanelDimStyle.Render("  error")})
+			} else {
+				lines = append(lines, panelLine{text: PanelDimStyle.Render(fmt.Sprintf("  ᛘ %s", s.Branch))})
+
+				if s.Uncommitted == 0 && s.Unpushed == 0 {
+					lines = append(lines, panelLine{text: PanelCleanStyle.Render("  ✓ clean")})
 				} else {
-					ciLine = PanelDimStyle.Render(fmt.Sprintf("  ○ CI %s", s.CI.Conclusion))
+					if s.Uncommitted > 0 {
+						lines = append(lines, panelLine{text: PanelDirtyStyle.Render(
+							fmt.Sprintf("  ● %d uncommitted", s.Uncommitted))})
+					}
+					if s.Unpushed > 0 {
+						lines = append(lines, panelLine{text: PanelWarnStyle.Render(
+							fmt.Sprintf("  ↑ %d unpushed", s.Unpushed))})
+						for _, c := range s.UnpushedCommits {
+							msg := c.Message
+							maxLen := p.width - 10
+							if maxLen < 10 {
+								maxLen = 10
+							}
+							if len(msg) > maxLen {
+								msg = msg[:maxLen-1] + "…"
+							}
+							lines = append(lines, panelLine{text: PanelDimStyle.Render(
+								fmt.Sprintf("    %s %s", c.SHA, msg))})
+						}
+					}
+				}
+				if !s.HasUpstream {
+					lines = append(lines, panelLine{text: PanelDimStyle.Render("  ⚠ no upstream")})
+				}
+
+				if s.CI != nil {
+					var ciLine string
+					switch s.CI.Conclusion {
+					case "success":
+						ciLine = PanelCleanStyle.Render("  ✓ CI passed")
+					case "failure":
+						ciLine = PanelCIFailStyle.Render("  ✗ CI failed")
+					case "cancelled":
+						ciLine = PanelDimStyle.Render("  ○ CI cancelled")
+					default:
+						if s.CI.Status == "in_progress" {
+							ciLine = PanelWarnStyle.Render("  ◌ CI running")
+						} else {
+							ciLine = PanelDimStyle.Render(fmt.Sprintf("  ○ CI %s", s.CI.Conclusion))
+						}
+					}
+					lines = append(lines, panelLine{text: ciLine})
 				}
 			}
-			lines = append(lines, panelLine{text: ciLine})
 		}
 
 		lines = append(lines, panelLine{text: ""})

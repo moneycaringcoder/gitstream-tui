@@ -52,6 +52,10 @@ type EventStream struct {
 	focused bool
 	width   int
 
+	epmWindow       []float64  // events-per-minute rolling window (last 30 points)
+	lastEPMTick     time.Time
+	currentMinCount int
+
 	DetailOverlay *blit.DetailOverlay[DisplayEvent]
 }
 
@@ -163,6 +167,18 @@ func (s *EventStream) Update(msg tea.Msg, ctx blit.Context) (blit.Component, tea
 	case blit.TickMsg:
 		s.poller.SetInterval(time.Duration(s.cfg.Interval) * time.Second)
 
+		// EPM window rotation
+		if s.lastEPMTick.IsZero() {
+			s.lastEPMTick = msg.Time
+		} else if msg.Time.Sub(s.lastEPMTick) >= time.Minute {
+			s.epmWindow = append(s.epmWindow, float64(s.currentMinCount))
+			if len(s.epmWindow) > 30 {
+				s.epmWindow = s.epmWindow[1:]
+			}
+			s.currentMinCount = 0
+			s.lastEPMTick = msg.Time
+		}
+
 		// Check if repos changed (config editor modified them)
 		currentRepos := s.cfg.Repos()
 		if !slicesEqual(currentRepos, s.knownRepos) {
@@ -212,6 +228,7 @@ func (s *EventStream) handleEvents(msg eventsMsg) (blit.Component, tea.Cmd) {
 		s.allEvents = append(s.allEvents, DisplayEvent{Event: ev, AddedAt: addedAt})
 		newCount++
 	}
+	s.currentMinCount += newCount
 	if newCount > 0 {
 		sort.Slice(s.allEvents, func(i, j int) bool {
 			return s.allEvents[i].Event.CreatedAt.Before(s.allEvents[j].Event.CreatedAt)
@@ -341,6 +358,10 @@ func (s *EventStream) renderHeader() string {
 		}
 		statusParts = append(statusParts, lipgloss.NewStyle().Foreground(rateColor).Render(
 			fmt.Sprintf("API %d/%d", stats.RateRemain, stats.RateLimit)))
+	}
+	if len(s.epmWindow) >= 2 {
+		spark, _ := blit.Sparkline(s.epmWindow, 30, nil)
+		statusParts = append(statusParts, "Activity: "+spark)
 	}
 	status := SubtitleStyle.Render(strings.Join(statusParts, "  "))
 
