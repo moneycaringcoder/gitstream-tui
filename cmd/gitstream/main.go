@@ -80,6 +80,27 @@ func main() {
 
 	blit.CleanupOldBinary()
 
+	// Build theme picker for runtime switching
+	presets := blit.Presets()
+	var pickerItems []blit.PickerItem
+	for name := range presets {
+		n := name
+		pickerItems = append(pickerItems, blit.PickerItem{
+			Title: n,
+			Value: n,
+		})
+	}
+	themePicker := blit.NewPicker(pickerItems, blit.PickerOpts{
+		Placeholder: "Search themes...",
+		OnConfirm: func(item blit.PickerItem) {
+			name := item.Value.(string)
+			if _, ok := presets[name]; ok {
+				cfg.Theme = name
+				config.Save(cfg)
+			}
+		},
+	})
+
 	debugLog := ui.NewDebugLog()
 	stream := ui.NewEventStream(cfg, debugLog)
 	panel := ui.NewStatusPanel()
@@ -192,7 +213,7 @@ func main() {
 	}
 
 	app := blit.NewApp(
-		blit.WithTheme(blit.DefaultTheme()),
+		blit.WithTheme(resolveTheme(cfg.Theme)),
 		blit.WithLayout(&blit.DualPane{
 			Main:         stream,
 			Side:         panel,
@@ -208,6 +229,7 @@ func main() {
 		blit.WithOverlay("Settings", "c", configEditor),
 		blit.WithOverlay("Debug", "D", debugOverlay),
 		blit.WithOverlay("Detail", "", detailOverlay),
+		blit.WithOverlay("Theme", "ctrl+t", themePicker),
 		// Global keybindings
 		blit.WithKeyBind(blit.KeyBind{
 			Key: "p", Label: "Pause/resume", Group: "CONTROLS",
@@ -397,4 +419,15 @@ func renderEventDetail(de ui.DisplayEvent, w int, theme blit.Theme) string {
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+func resolveTheme(name string) blit.Theme {
+	if name == "" {
+		return blit.DefaultTheme()
+	}
+	presets := blit.Presets()
+	if t, ok := presets[name]; ok {
+		return t
+	}
+	return blit.DefaultTheme()
 }

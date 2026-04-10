@@ -44,6 +44,7 @@ func (r RepoEntry) MarshalYAML() (interface{}, error) {
 type Config struct {
 	RepoEntries []RepoEntry `yaml:"repos"`
 	Interval    int         `yaml:"interval"`
+	Theme       string      `yaml:"theme,omitempty"`
 }
 
 // Repos returns just the repo name strings for backward compatibility.
