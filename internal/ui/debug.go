@@ -47,9 +47,7 @@ func (d *DebugOverlay) View() string {
 	var b strings.Builder
 	th := d.theme
 
-	title := lipgloss.NewStyle().Bold(true).Foreground(th.Text).
-		PaddingLeft(1).Render(blit.Divider(d.width, th))
-	b.WriteString(title + "\n\n")
+	b.WriteString(" " + blit.Divider(d.width-2, th) + "\n\n")
 
 	stats := d.debugLog.GetStats()
 
@@ -113,13 +111,8 @@ func (d *DebugOverlay) View() string {
 		var labels []string
 		for repo, h := range stats.RepoHealth {
 			short := repo
-			if i := len(repo) - 1; i >= 0 {
-				for j := i; j >= 0; j-- {
-					if repo[j] == '/' {
-						short = repo[j+1:]
-						break
-					}
-				}
+			if i := strings.LastIndex(repo, "/"); i >= 0 {
+				short = repo[i+1:]
 			}
 			streak := float64(h.FailStreak)
 			if h.LastSuccess {

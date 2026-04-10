@@ -8,25 +8,17 @@ import (
 // Styles holds all UI styles derived from the current theme.
 // Rebuild via NewStyles whenever the theme changes.
 type Styles struct {
-	Title     lipgloss.Style
-	Subtitle  lipgloss.Style
-	Time      lipgloss.Style
-	Repo      lipgloss.Style
-	Actor     lipgloss.Style
-	Detail    lipgloss.Style
-	StatusBar lipgloss.Style
+	Title    lipgloss.Style
+	Subtitle lipgloss.Style
+	Detail   lipgloss.Style
 
-	PanelBorder  lipgloss.Style
-	PanelTitle   lipgloss.Style
-	PanelDivider lipgloss.Style
-	PanelRepo    lipgloss.Style
-	PanelDim     lipgloss.Style
-	PanelClean   lipgloss.Style
-	PanelDirty   lipgloss.Style
-	PanelWarn    lipgloss.Style
-	PanelCIFail  lipgloss.Style
+	PanelRepo  lipgloss.Style
+	PanelDim   lipgloss.Style
+	PanelClean lipgloss.Style
+	PanelDirty lipgloss.Style
+	PanelWarn  lipgloss.Style
+	PanelCIFail lipgloss.Style
 
-	Divider     lipgloss.Style
 	DetailRepo  lipgloss.Style
 	DetailActor lipgloss.Style
 	DetailTime  lipgloss.Style
@@ -37,23 +29,15 @@ func NewStyles(t blit.Theme) Styles {
 	return Styles{
 		Title:    lipgloss.NewStyle().Bold(true).Foreground(t.Text).PaddingLeft(1),
 		Subtitle: lipgloss.NewStyle().Foreground(t.Muted).PaddingLeft(1),
-		Time:     lipgloss.NewStyle().Foreground(t.Muted).Width(20),
-		Repo:     lipgloss.NewStyle().Foreground(t.Text).Bold(true).Width(18),
-		Actor:    lipgloss.NewStyle().Foreground(t.Text).Width(22),
 		Detail:   lipgloss.NewStyle().Foreground(t.Muted),
-		StatusBar: lipgloss.NewStyle().Foreground(t.Muted).PaddingLeft(1),
 
-		PanelBorder:  lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(t.Border).Padding(0, 1),
-		PanelTitle:   lipgloss.NewStyle().Bold(true).Foreground(t.Text),
-		PanelDivider: lipgloss.NewStyle().Foreground(t.Border),
-		PanelRepo:    lipgloss.NewStyle().Bold(true).Foreground(t.Accent),
-		PanelDim:     lipgloss.NewStyle().Foreground(t.Muted),
-		PanelClean:   lipgloss.NewStyle().Foreground(t.Positive),
-		PanelDirty:   lipgloss.NewStyle().Foreground(t.Warn),
-		PanelWarn:    lipgloss.NewStyle().Foreground(t.Color("issue", t.Warn)),
-		PanelCIFail:  lipgloss.NewStyle().Foreground(t.Negative),
+		PanelRepo:  lipgloss.NewStyle().Bold(true).Foreground(t.Accent),
+		PanelDim:   lipgloss.NewStyle().Foreground(t.Muted),
+		PanelClean: lipgloss.NewStyle().Foreground(t.Positive),
+		PanelDirty: lipgloss.NewStyle().Foreground(t.Warn),
+		PanelWarn:  lipgloss.NewStyle().Foreground(t.Color("issue", t.Warn)),
+		PanelCIFail: lipgloss.NewStyle().Foreground(t.Negative),
 
-		Divider:     lipgloss.NewStyle().Foreground(t.Border),
 		DetailRepo:  lipgloss.NewStyle().Bold(true).Foreground(t.Text),
 		DetailActor: lipgloss.NewStyle().Foreground(t.Text),
 		DetailTime:  lipgloss.NewStyle().Foreground(t.Muted),
