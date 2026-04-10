@@ -3,9 +3,10 @@ module github.com/moneycaringcoder/gitstream-tui
 go 1.26.1
 
 require (
-	github.com/blitui/blit v0.1.1
+	github.com/blitui/blit v0.1.2
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
+	github.com/charmbracelet/x/ansi v0.11.6
 )
 
 require (
@@ -21,7 +22,6 @@ require (
 	github.com/charmbracelet/log v0.4.1 // indirect
 	github.com/charmbracelet/ssh v0.0.0-20250128164007-98fd5ae11894 // indirect
 	github.com/charmbracelet/wish v1.4.7 // indirect
-	github.com/charmbracelet/x/ansi v0.11.6 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.15 // indirect
 	github.com/charmbracelet/x/conpty v0.1.0 // indirect
 	github.com/charmbracelet/x/errors v0.0.0-20240508181413-e8d8b6e2de86 // indirect
@@ -63,5 +63,3 @@ require (
 	golang.org/x/text v0.36.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/blitui/blit => ../blit
