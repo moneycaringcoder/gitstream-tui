@@ -111,6 +111,7 @@ func (d *DebugOverlay) SetSize(w, h int) {
 
 func (d *DebugOverlay) Focused() bool     { return d.focused }
 func (d *DebugOverlay) SetFocused(f bool)  { d.focused = f; d.logViewer.SetFocused(f) }
+func (d *DebugOverlay) SetTheme(t blit.Theme) { d.logViewer.SetTheme(t) }
 func (d *DebugOverlay) IsActive() bool     { return d.active }
 func (d *DebugOverlay) SetActive(v bool)   { d.active = v }
 func (d *DebugOverlay) Close()             { d.active = false }

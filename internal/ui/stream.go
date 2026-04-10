@@ -416,6 +416,12 @@ func (s *EventStream) SetFocused(f bool) {
 	s.table.SetFocused(f)
 }
 
+// SetTheme implements blit.Themed so the App's theme propagates through
+// Tabs → EventStream → Table.
+func (s *EventStream) SetTheme(t blit.Theme) {
+	s.table.SetTheme(t)
+}
+
 // Public methods for app-level keybinding handlers.
 
 func (s *EventStream) SetRepoFilter(repo string) {

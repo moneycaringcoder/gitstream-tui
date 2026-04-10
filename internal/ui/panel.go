@@ -87,6 +87,11 @@ func (p *StatusPanel) SetFocused(f bool) {
 	p.listView.SetFocused(f)
 }
 
+// SetTheme implements blit.Themed so the App's theme propagates to the ListView.
+func (p *StatusPanel) SetTheme(t blit.Theme) {
+	p.listView.SetTheme(t)
+}
+
 func (p *StatusPanel) rebuildContent() {
 	var lines []panelLine
 	p.headerMap = make(map[int]string)
