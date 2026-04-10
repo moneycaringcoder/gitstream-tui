@@ -50,7 +50,7 @@ func renderEventLine(ev github.Event, now time.Time) string {
 	line := fmt.Sprintf("%s  %s %s %s %s",
 		TimeStyle.Render(timeStr),
 		RepoStyle.Render(repo),
-		LabelStyle(ev.Type).Render(label),
+		blit.Badge(label, EventColor(ev.Type), true),
 		ActorStyle.Render(actor),
 		detailRendered,
 	)

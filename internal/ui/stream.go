@@ -341,7 +341,7 @@ func (s *EventStream) renderDetailBar(de DisplayEvent, theme blit.Theme) string 
 	color := EventColor(ev.Type)
 
 	line1 := fmt.Sprintf(" %s  %s  %s  %s",
-		DetailLabelStyle(color).Render(label),
+		blit.Badge(label, color, true),
 		DetailRepoStyle.Render(repo),
 		DetailActorStyle.Render(actor),
 		DetailTimeStyle.Render(t),

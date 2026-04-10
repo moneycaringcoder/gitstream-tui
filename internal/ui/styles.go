@@ -119,19 +119,6 @@ func EventColor(eventType string) lipgloss.Color {
 	}
 }
 
-// LabelStyle returns a styled label for a given event type.
-func LabelStyle(eventType string) lipgloss.Style {
-	return lipgloss.NewStyle().
-		Foreground(EventColor(eventType)).
-		Width(9).
-		Bold(true)
-}
-
-// DetailLabelStyle returns a bold label style with a given color.
-func DetailLabelStyle(color lipgloss.Color) lipgloss.Style {
-	return lipgloss.NewStyle().Bold(true).Foreground(color)
-}
-
 // LabelColor maps a display label (e.g. "PUSH", "PR") back to its color.
 func LabelColor(label string) lipgloss.Color {
 	switch label {
