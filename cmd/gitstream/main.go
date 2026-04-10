@@ -297,19 +297,31 @@ func main() {
 		},
 	})
 
-	// Tab bar for event type filtering
-	tabs := blit.NewTabs([]blit.TabItem{
+	// Tab bar for event type filtering.
+	// Stream is assigned as Content only to the initial tab; OnChange moves
+	// it into the newly active slot so Tabs.SetFocused doesn't clobber
+	// the shared stream's focus state (last-writer-wins across 5 items).
+	tabItems := []blit.TabItem{
 		{Title: "All", Glyph: "◉", Content: stream},
-		{Title: "Pushes", Glyph: "↑", Content: stream},
-		{Title: "PRs", Glyph: "⎇", Content: stream},
-		{Title: "Issues", Glyph: "!", Content: stream},
-		{Title: "Local", Glyph: "⌂", Content: stream},
-	}, blit.TabsOpts{
+		{Title: "Pushes", Glyph: "↑"},
+		{Title: "PRs", Glyph: "⎇"},
+		{Title: "Issues", Glyph: "!"},
+		{Title: "Local", Glyph: "⌂"},
+	}
+	tabs := blit.NewTabs(tabItems, blit.TabsOpts{
 		OnChange: func(idx int) {
 			filters := []string{"", "PushEvent", "PullRequestEvent", "IssuesEvent", "LocalPushEvent"}
 			if idx < len(filters) {
 				stream.SetTypeFilter(filters[idx])
 				updateStatusRight()
+			}
+			// Move stream into the active tab, clear the rest.
+			for i := range tabItems {
+				if i == idx {
+					tabItems[i].Content = stream
+				} else {
+					tabItems[i].Content = nil
+				}
 			}
 		},
 	})
