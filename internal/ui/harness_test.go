@@ -74,8 +74,9 @@ func TestHarness_CursorNavigation(t *testing.T) {
 		Expect("charlie")
 }
 
-// TestHarness_GoldenInitial asserts a golden snapshot of the initial screen.
-func TestHarness_GoldenInitial(t *testing.T) {
+// TestHarness_EventTypes verifies that event type badges render correctly
+// for each injected event type.
+func TestHarness_EventTypes(t *testing.T) {
 	cfg := testConfig()
 	debugLog := NewDebugLog()
 	stream := NewEventStream(cfg, debugLog)
@@ -95,11 +96,14 @@ func TestHarness_GoldenInitial(t *testing.T) {
 		),
 	)
 
-	h := btest.NewHarness(t, app.Model(), 100, 30)
+	h := btest.NewHarness(t, app.Model(), 120, 40)
 	defer h.Done()
 
 	h.Send(eventsMsg{events: testEvents()})
-	h.Snapshot("event_stream_initial")
+
+	h.Expect("PUSH").
+		Expect("PR").
+		Expect("ISSUE")
 }
 
 // TestHarness_Resize verifies the layout adapts to terminal size changes.

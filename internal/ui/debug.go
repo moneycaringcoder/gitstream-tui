@@ -166,3 +166,56 @@ func (d *DebugOverlay) SetTheme(t blit.Theme) { d.theme = t; d.logViewer.SetThem
 func (d *DebugOverlay) IsActive() bool     { return d.active }
 func (d *DebugOverlay) SetActive(v bool)   { d.active = v }
 func (d *DebugOverlay) Close()             { d.active = false }
+
+// FloatView implements blit.FloatingOverlay. It composites the debug panel
+// as a right-side drawer over the background content.
+func (d *DebugOverlay) FloatView(background string) string {
+	if !d.active {
+		return background
+	}
+	panel := d.View()
+	if panel == "" {
+		return background
+	}
+
+	panelWidth := d.width * 2 / 5
+	if panelWidth < 30 {
+		panelWidth = 30
+	}
+	if panelWidth > d.width {
+		panelWidth = d.width
+	}
+	xOffset := d.width - panelWidth
+
+	// Style the panel with a border and background
+	panelStyle := lipgloss.NewStyle().
+		Width(panelWidth - 2).
+		MaxHeight(d.height).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(d.theme.Border).
+		Foreground(d.theme.Text)
+	styledPanel := panelStyle.Render(panel)
+
+	bgLines := strings.Split(background, "\n")
+	panelLines := strings.Split(styledPanel, "\n")
+
+	for len(bgLines) < len(panelLines) {
+		bgLines = append(bgLines, strings.Repeat(" ", d.width))
+	}
+
+	for i, pLine := range panelLines {
+		if i >= len(bgLines) {
+			break
+		}
+		bgLine := bgLines[i]
+		// Pad background line to xOffset
+		bgRunes := []rune(bgLine)
+		for len(bgRunes) < xOffset {
+			bgRunes = append(bgRunes, ' ')
+		}
+		// Overwrite from xOffset with panel line
+		bgLines[i] = string(bgRunes[:xOffset]) + pLine
+	}
+
+	return strings.Join(bgLines, "\n")
+}
