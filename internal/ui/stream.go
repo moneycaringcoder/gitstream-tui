@@ -159,6 +159,20 @@ func (s *EventStream) Update(msg tea.Msg, ctx blit.Context) (blit.Component, tea
 				return s, blit.Consumed()
 			}
 		}
+		// 'y' copies event URL to clipboard
+		if msg.String() == "y" {
+			idx := s.table.CursorIndex()
+			if idx >= 0 && idx < len(s.filteredEvents) {
+				if url := s.filteredEvents[idx].Event.URL(); url != "" {
+					return s, tea.Batch(
+						blit.CopyToClipboardCmd(url),
+						blit.ToastSuccess("Copied", url),
+						blit.Consumed(),
+					)
+				}
+			}
+			return s, blit.Consumed()
+		}
 		// Let table handle its own keys (cursor, search, etc.)
 		comp, cmd := s.table.Update(msg, ctx)
 		_ = comp
@@ -247,16 +261,16 @@ func (s *EventStream) handleEvents(msg eventsMsg) (blit.Component, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	if newCount > 0 && !s.isAtNewEdge() {
-		cmds = append(cmds, blit.ToastCmd(blit.SeverityInfo, "New events",
-			fmt.Sprintf("%d new events arrived", newCount), 3*time.Second))
+		cmds = append(cmds, blit.ToastInfo("New events",
+			fmt.Sprintf("%d new events arrived", newCount)))
 	}
 
 	stats := s.debugLog.GetStats()
 	if stats.RateLimit > 0 {
 		ratePct := float64(stats.RateRemain) / float64(stats.RateLimit) * 100
 		if ratePct < 20 {
-			cmds = append(cmds, blit.ToastCmd(blit.SeverityWarn, "Rate limit low",
-				fmt.Sprintf("API rate limit at %.0f%%", ratePct), 5*time.Second))
+			cmds = append(cmds, blit.ToastWarn("Rate limit low",
+				fmt.Sprintf("API rate limit at %.0f%%", ratePct)))
 		}
 	}
 
@@ -400,6 +414,7 @@ func (s *EventStream) KeyBindings() []blit.KeyBind {
 	bindings = append(bindings,
 		blit.KeyBind{Key: "enter", Label: "Event detail", Group: "NAVIGATION"},
 		blit.KeyBind{Key: "o", Label: "Open in browser", Group: "NAVIGATION"},
+		blit.KeyBind{Key: "y", Label: "Copy URL", Group: "NAVIGATION"},
 	)
 	return bindings
 }

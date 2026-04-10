@@ -3,10 +3,9 @@ module github.com/moneycaringcoder/gitstream-tui
 go 1.26.1
 
 require (
-	github.com/blitui/blit v0.1.0
+	github.com/blitui/blit v0.1.1
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
-	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -62,4 +61,7 @@ require (
 	golang.org/x/sys v0.43.0 // indirect
 	golang.org/x/term v0.42.0 // indirect
 	golang.org/x/text v0.36.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/blitui/blit => ../blit

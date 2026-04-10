@@ -3,9 +3,8 @@ package config
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
-	"gopkg.in/yaml.v3"
+	blit "github.com/blitui/blit"
 )
 
 // RepoEntry represents a watched repo with an optional local path override.
@@ -68,24 +67,28 @@ func (c *Config) ExplicitPaths() map[string]string {
 }
 
 func DefaultPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "gitstream", "config.yaml")
+	p, err := blit.DefaultConfigPath("gitstream")
+	if err != nil {
+		home, _ := os.UserHomeDir()
+		return home + "/.config/gitstream/config.yaml"
+	}
+	return p
 }
 
 func Load() (*Config, error) {
 	path := DefaultPath()
 
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("no config found at %s - run 'gitstream add owner/repo' to get started", path)
-		}
+	var cfg Config
+	if err := blit.LoadYAML(path, &cfg); err != nil {
 		return nil, err
 	}
 
-	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("invalid config: %w", err)
+	// LoadYAML returns nil for missing files, so check if we got anything.
+	if cfg.RepoEntries == nil {
+		// Check if the file actually exists to give a helpful message.
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			return nil, fmt.Errorf("no config found at %s - run 'gitstream add owner/repo' to get started", path)
+		}
 	}
 
 	if cfg.Interval <= 0 {
@@ -96,18 +99,7 @@ func Load() (*Config, error) {
 }
 
 func Save(cfg *Config) error {
-	path := DefaultPath()
-
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-
-	data, err := yaml.Marshal(cfg)
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(path, data, 0o644)
+	return blit.SaveYAML(DefaultPath(), cfg)
 }
 
 func AddRepo(repo string) error {

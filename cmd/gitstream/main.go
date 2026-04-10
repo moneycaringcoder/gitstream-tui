@@ -133,14 +133,17 @@ func main() {
 			Group: "Polling",
 			Hint:  "How often to poll GitHub for new events (min 5)",
 			Get:   func() string { return strconv.Itoa(cfg.Interval) },
-			Set: func(v string) error {
+			Validate: func(v string) error {
 				n, err := strconv.Atoi(v)
 				if err != nil || n < 5 {
 					return fmt.Errorf("must be a number >= 5")
 				}
-				cfg.Interval = n
-				config.Save(cfg)
 				return nil
+			},
+			Set: func(v string) error {
+				n, _ := strconv.Atoi(v)
+				cfg.Interval = n
+				return config.Save(cfg)
 			},
 		},
 		{
@@ -148,7 +151,7 @@ func main() {
 			Group: "Repos",
 			Hint:  "Add a new repo to watch (owner/repo format)",
 			Get:   func() string { return "" },
-			Set: func(v string) error {
+			Validate: func(v string) error {
 				v = strings.TrimSpace(v)
 				if v == "" || !strings.Contains(v, "/") {
 					return fmt.Errorf("must be owner/repo format")
@@ -158,9 +161,12 @@ func main() {
 						return fmt.Errorf("repo already exists")
 					}
 				}
-				cfg.RepoEntries = append(cfg.RepoEntries, config.RepoEntry{Name: v})
-				config.Save(cfg)
 				return nil
+			},
+			Set: func(v string) error {
+				v = strings.TrimSpace(v)
+				cfg.RepoEntries = append(cfg.RepoEntries, config.RepoEntry{Name: v})
+				return config.Save(cfg)
 			},
 		},
 		{
@@ -168,23 +174,25 @@ func main() {
 			Group: "Repos",
 			Hint:  "Remove a watched repo (owner/repo format)",
 			Get:   func() string { return "" },
+			Validate: func(v string) error {
+				v = strings.TrimSpace(v)
+				for _, r := range cfg.RepoEntries {
+					if r.Name == v {
+						return nil
+					}
+				}
+				return fmt.Errorf("repo not found")
+			},
 			Set: func(v string) error {
 				v = strings.TrimSpace(v)
 				filtered := make([]config.RepoEntry, 0, len(cfg.RepoEntries))
-				found := false
 				for _, r := range cfg.RepoEntries {
-					if r.Name == v {
-						found = true
-						continue
+					if r.Name != v {
+						filtered = append(filtered, r)
 					}
-					filtered = append(filtered, r)
-				}
-				if !found {
-					return fmt.Errorf("repo not found")
 				}
 				cfg.RepoEntries = filtered
-				config.Save(cfg)
-				return nil
+				return config.Save(cfg)
 			},
 		},
 	})
@@ -193,7 +201,7 @@ func main() {
 	// deadlocking — bubbletea's p.msgs is unbuffered, and Signal.Set triggers
 	// bus.schedule → p.Send from the UI goroutine which would block forever.
 	leftSig := blit.NewSignal(
-		" ? help  s sort  t type  c config  D debug  p pause  r refresh  1-5 tab  0 clear")
+		" ? help  s sort  t type  c config  D debug  p pause  r refresh  y copy  1-5 tab  0 clear")
 	rightSig := blit.NewSignal[string]("")
 	updateStatusRight := func() {
 		var parts []string
@@ -407,6 +415,7 @@ Keybindings (in TUI):
   Tab           Switch focus
   Enter         Event detail
   o             Open in browser
+  y             Copy URL to clipboard
 
 Config: ~/.config/gitstream/config.yaml
 `)

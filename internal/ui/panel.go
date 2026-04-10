@@ -32,6 +32,7 @@ func NewStatusPanel() *StatusPanel {
 		headerMap: make(map[int]string),
 	}
 	p.listView = blit.NewListView(blit.ListViewOpts[panelLine]{
+		EmptyText: "No local repos found",
 		RenderItem: func(item panelLine, idx int, isCursor bool, theme blit.Theme) string {
 			return item.text
 		},
