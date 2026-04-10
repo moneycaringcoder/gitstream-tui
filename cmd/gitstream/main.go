@@ -296,10 +296,27 @@ func main() {
 		},
 	})
 
+	// Tab bar for event type filtering
+	tabs := blit.NewTabs([]blit.TabItem{
+		{Title: "All", Glyph: "◉", Content: stream},
+		{Title: "Pushes", Glyph: "↑", Content: stream},
+		{Title: "PRs", Glyph: "⎇", Content: stream},
+		{Title: "Issues", Glyph: "!", Content: stream},
+		{Title: "Local", Glyph: "⌂", Content: stream},
+	}, blit.TabsOpts{
+		OnChange: func(idx int) {
+			filters := []string{"", "PushEvent", "PullRequestEvent", "IssuesEvent", "LocalPushEvent"}
+			if idx < len(filters) {
+				stream.SetTypeFilter(filters[idx])
+				updateStatusRight()
+			}
+		},
+	})
+
 	app := blit.NewApp(
 		blit.WithTheme(resolveTheme(cfg.Theme)),
 		blit.WithLayout(&blit.DualPane{
-			Main:         stream,
+			Main:         tabs,
 			Side:         panel,
 			MainName:     "Stream",
 			SideName:     "Local",
