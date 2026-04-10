@@ -51,6 +51,8 @@ type EventStream struct {
 
 	focused bool
 	width   int
+	theme   blit.Theme
+	styles  Styles
 
 	epmWindow       []float64  // events-per-minute rolling window (last 30 points)
 	lastEPMTick     time.Time
@@ -60,6 +62,7 @@ type EventStream struct {
 }
 
 func NewEventStream(cfg *config.Config, debugLog *DebugLog) *EventStream {
+	th := blit.DefaultTheme()
 	s := &EventStream{
 		cfg:            cfg,
 		debugLog:       debugLog,
@@ -68,6 +71,8 @@ func NewEventStream(cfg *config.Config, debugLog *DebugLog) *EventStream {
 		allEvents:      make([]DisplayEvent, 0, 256),
 		filteredEvents: make([]DisplayEvent, 0, 256),
 		knownRepos:     append([]string{}, cfg.Repos()...),
+		theme:          th,
+		styles:         NewStyles(th),
 	}
 
 	columns := []blit.Column{
@@ -85,10 +90,10 @@ func NewEventStream(cfg *config.Config, debugLog *DebugLog) *EventStream {
 				return ""
 			}
 			switch colIdx {
-			case 0: // Time - dim gray
-				return lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Render(row[colIdx])
+			case 0: // Time
+				return lipgloss.NewStyle().Foreground(theme.Muted).Render(row[colIdx])
 			case 2: // Type - colored badge
-				return blit.Badge(row[colIdx], LabelColor(row[colIdx]), true)
+				return blit.Badge(row[colIdx], LabelColor(row[colIdx], theme), true)
 			default:
 				return row[colIdx]
 			}
@@ -97,7 +102,7 @@ func NewEventStream(cfg *config.Config, debugLog *DebugLog) *EventStream {
 			if idx < len(s.filteredEvents) {
 				de := s.filteredEvents[idx]
 				if !de.AddedAt.IsZero() && time.Now().Before(de.AddedAt.Add(flashDuration)) {
-					st := lipgloss.NewStyle().Background(lipgloss.Color("#1a2a1a"))
+					st := lipgloss.NewStyle().Background(theme.Flash)
 					return &st
 				}
 			}
@@ -333,13 +338,13 @@ func (s *EventStream) View() string {
 }
 
 func (s *EventStream) renderHeader() string {
-	title := TitleStyle.Render("gitstream")
-	repoList := SubtitleStyle.Render(fmt.Sprintf("Watching: %s", strings.Join(s.cfg.Repos(), ", ")))
+	title := s.styles.Title.Render("gitstream")
+	repoList := s.styles.Subtitle.Render(fmt.Sprintf("Watching: %s", strings.Join(s.cfg.Repos(), ", ")))
 
 	// Status line: poll info + health dots + rate limit
 	var statusParts []string
 	if s.poller.IsPaused() {
-		statusParts = append(statusParts, lipgloss.NewStyle().Foreground(lipgloss.Color("#eab308")).Render("[PAUSED]"))
+		statusParts = append(statusParts, lipgloss.NewStyle().Foreground(s.theme.Warn).Render("[PAUSED]"))
 	} else if !s.poller.LastPoll().IsZero() {
 		ago := time.Since(s.poller.LastPoll()).Truncate(time.Second)
 		statusParts = append(statusParts, fmt.Sprintf("Poll %s ago", ago))
@@ -350,25 +355,25 @@ func (s *EventStream) renderHeader() string {
 		if i := strings.LastIndex(repo, "/"); i >= 0 {
 			short = repo[i+1:]
 		}
-		dot := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Render("○")
+		dot := lipgloss.NewStyle().Foreground(s.theme.Muted).Render("○")
 		if h, ok := stats.RepoHealth[repo]; ok {
 			if h.LastSuccess {
-				dot = lipgloss.NewStyle().Foreground(lipgloss.Color("#22c55e")).Render("●")
+				dot = lipgloss.NewStyle().Foreground(s.theme.Positive).Render("●")
 			} else if h.UsingCache && h.FailStreak < 10 {
-				dot = lipgloss.NewStyle().Foreground(lipgloss.Color("#eab308")).Render("●")
+				dot = lipgloss.NewStyle().Foreground(s.theme.Warn).Render("●")
 			} else {
-				dot = lipgloss.NewStyle().Foreground(lipgloss.Color("#ef4444")).Render("●")
+				dot = lipgloss.NewStyle().Foreground(s.theme.Negative).Render("●")
 			}
 		}
 		statusParts = append(statusParts, dot+" "+short)
 	}
 	if stats.RateLimit > 0 {
 		ratePct := float64(stats.RateRemain) / float64(stats.RateLimit) * 100
-		rateColor := lipgloss.Color("#22c55e")
+		rateColor := s.theme.Positive
 		if ratePct < 20 {
-			rateColor = lipgloss.Color("#ef4444")
+			rateColor = s.theme.Negative
 		} else if ratePct < 50 {
-			rateColor = lipgloss.Color("#eab308")
+			rateColor = s.theme.Warn
 		}
 		statusParts = append(statusParts, lipgloss.NewStyle().Foreground(rateColor).Render(
 			fmt.Sprintf("API %d/%d", stats.RateRemain, stats.RateLimit)))
@@ -377,7 +382,7 @@ func (s *EventStream) renderHeader() string {
 		spark, _ := blit.Sparkline(s.epmWindow, 30, nil)
 		statusParts = append(statusParts, "Activity: "+spark)
 	}
-	status := SubtitleStyle.Render(strings.Join(statusParts, "  "))
+	status := s.styles.Subtitle.Render(strings.Join(statusParts, "  "))
 
 	return lipgloss.JoinVertical(lipgloss.Left, title, repoList, status)
 }
@@ -390,21 +395,21 @@ func (s *EventStream) renderDetailBar(de DisplayEvent, theme blit.Theme) string 
 	label := ev.Label()
 	actor := ev.Actor.Login
 	t := ev.CreatedAt.Local().Format("2006-01-02 15:04:05")
-	color := EventColor(ev.Type)
+	color := EventColor(ev.Type, theme)
 
 	line1 := fmt.Sprintf(" %s  %s  %s  %s",
 		blit.Badge(label, color, true),
-		DetailRepoStyle.Render(repo),
-		DetailActorStyle.Render(actor),
-		DetailTimeStyle.Render(t),
+		s.styles.DetailRepo.Render(repo),
+		s.styles.DetailActor.Render(actor),
+		s.styles.DetailTime.Render(t),
 	)
 
 	detail := blit.Truncate(ev.Detail(), s.width-20)
 	urlHint := ""
 	if url := ev.URL(); url != "" {
-		urlHint = DetailTimeStyle.Render("  ↵ open")
+		urlHint = s.styles.DetailTime.Render("  ↵ open")
 	}
-	line2 := " " + DetailStyle.Render(detail) + urlHint
+	line2 := " " + s.styles.Detail.Render(detail) + urlHint
 
 	return divider + "\n" + line1 + "\n" + line2
 }
@@ -434,6 +439,8 @@ func (s *EventStream) SetFocused(f bool) {
 // SetTheme implements blit.Themed so the App's theme propagates through
 // Tabs → EventStream → Table.
 func (s *EventStream) SetTheme(t blit.Theme) {
+	s.theme = t
+	s.styles = NewStyles(t)
 	s.table.SetTheme(t)
 }
 

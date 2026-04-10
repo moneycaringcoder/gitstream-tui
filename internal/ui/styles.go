@@ -1,148 +1,117 @@
 package ui
 
-import "github.com/charmbracelet/lipgloss"
-
-var (
-	// Event type colors
-	ColorPush    = lipgloss.Color("#22c55e") // green
-	ColorPR      = lipgloss.Color("#3b82f6") // blue
-	ColorReview  = lipgloss.Color("#a855f7") // purple
-	ColorComment = lipgloss.Color("#06b6d4") // cyan
-	ColorIssue   = lipgloss.Color("#eab308") // yellow
-	ColorCreate  = lipgloss.Color("#22c55e") // green
-	ColorDelete  = lipgloss.Color("#ef4444") // red
-	ColorRelease = lipgloss.Color("#f97316") // orange
-	ColorLocal   = lipgloss.Color("#a78bfa") // light purple
-	ColorDim     = lipgloss.Color("#6b7280") // gray
-
-	// Layout styles
-	TitleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#ffffff")).
-			PaddingLeft(1)
-
-	SubtitleStyle = lipgloss.NewStyle().
-			Foreground(ColorDim).
-			PaddingLeft(1)
-
-	TimeStyle = lipgloss.NewStyle().
-			Foreground(ColorDim).
-			Width(20)
-
-	RepoStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#ffffff")).
-			Bold(true).
-			Width(18)
-
-	ActorStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#d1d5db")).
-			Width(22)
-
-	DetailStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#9ca3af"))
-
-	StatusBarStyle = lipgloss.NewStyle().
-			Foreground(ColorDim).
-			PaddingLeft(1)
-
-	// Status panel styles
-	PanelBorderStyle = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("#3b3b3b")).
-				Padding(0, 1)
-
-	PanelTitleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#ffffff"))
-
-	PanelDividerStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#3b3b3b"))
-
-	PanelRepoStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#3b82f6"))
-
-	PanelDimStyle = lipgloss.NewStyle().
-			Foreground(ColorDim)
-
-	PanelCleanStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#22c55e"))
-
-	PanelDirtyStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#eab308"))
-
-	PanelWarnStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#f97316"))
-
-	PanelCIFailStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#ef4444"))
-
-	DividerStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#3b3b3b"))
-
-	DetailRepoStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#ffffff"))
-
-	DetailActorStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#d1d5db"))
-
-	DetailTimeStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#6b7280"))
+import (
+	"github.com/charmbracelet/lipgloss"
+	blit "github.com/blitui/blit"
 )
 
-// EventColor returns the color for a given event type.
-func EventColor(eventType string) lipgloss.Color {
-	switch eventType {
-	case "LocalPushEvent":
-		return ColorLocal
-	case "PushEvent":
-		return ColorPush
-	case "PullRequestEvent":
-		return ColorPR
-	case "PullRequestReviewEvent", "PullRequestReviewCommentEvent":
-		return ColorReview
-	case "IssueCommentEvent":
-		return ColorComment
-	case "IssuesEvent":
-		return ColorIssue
-	case "CreateEvent":
-		return ColorCreate
-	case "DeleteEvent":
-		return ColorDelete
-	case "ReleaseEvent":
-		return ColorRelease
-	case "MemberEvent":
-		return ColorComment
-	default:
-		return ColorDim
+// Styles holds all UI styles derived from the current theme.
+// Rebuild via NewStyles whenever the theme changes.
+type Styles struct {
+	Title     lipgloss.Style
+	Subtitle  lipgloss.Style
+	Time      lipgloss.Style
+	Repo      lipgloss.Style
+	Actor     lipgloss.Style
+	Detail    lipgloss.Style
+	StatusBar lipgloss.Style
+
+	PanelBorder  lipgloss.Style
+	PanelTitle   lipgloss.Style
+	PanelDivider lipgloss.Style
+	PanelRepo    lipgloss.Style
+	PanelDim     lipgloss.Style
+	PanelClean   lipgloss.Style
+	PanelDirty   lipgloss.Style
+	PanelWarn    lipgloss.Style
+	PanelCIFail  lipgloss.Style
+
+	Divider     lipgloss.Style
+	DetailRepo  lipgloss.Style
+	DetailActor lipgloss.Style
+	DetailTime  lipgloss.Style
+}
+
+// NewStyles constructs a full Styles set from a blit.Theme.
+func NewStyles(t blit.Theme) Styles {
+	return Styles{
+		Title:    lipgloss.NewStyle().Bold(true).Foreground(t.Text).PaddingLeft(1),
+		Subtitle: lipgloss.NewStyle().Foreground(t.Muted).PaddingLeft(1),
+		Time:     lipgloss.NewStyle().Foreground(t.Muted).Width(20),
+		Repo:     lipgloss.NewStyle().Foreground(t.Text).Bold(true).Width(18),
+		Actor:    lipgloss.NewStyle().Foreground(t.Text).Width(22),
+		Detail:   lipgloss.NewStyle().Foreground(t.Muted),
+		StatusBar: lipgloss.NewStyle().Foreground(t.Muted).PaddingLeft(1),
+
+		PanelBorder:  lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(t.Border).Padding(0, 1),
+		PanelTitle:   lipgloss.NewStyle().Bold(true).Foreground(t.Text),
+		PanelDivider: lipgloss.NewStyle().Foreground(t.Border),
+		PanelRepo:    lipgloss.NewStyle().Bold(true).Foreground(t.Accent),
+		PanelDim:     lipgloss.NewStyle().Foreground(t.Muted),
+		PanelClean:   lipgloss.NewStyle().Foreground(t.Positive),
+		PanelDirty:   lipgloss.NewStyle().Foreground(t.Warn),
+		PanelWarn:    lipgloss.NewStyle().Foreground(t.Color("issue", t.Warn)),
+		PanelCIFail:  lipgloss.NewStyle().Foreground(t.Negative),
+
+		Divider:     lipgloss.NewStyle().Foreground(t.Border),
+		DetailRepo:  lipgloss.NewStyle().Bold(true).Foreground(t.Text),
+		DetailActor: lipgloss.NewStyle().Foreground(t.Text),
+		DetailTime:  lipgloss.NewStyle().Foreground(t.Muted),
 	}
 }
 
-// LabelColor maps a display label (e.g. "PUSH", "PR") back to its color.
-func LabelColor(label string) lipgloss.Color {
+// EventColor returns the color for a given event type, derived from theme tokens.
+func EventColor(eventType string, theme blit.Theme) lipgloss.Color {
+	switch eventType {
+	case "LocalPushEvent":
+		return theme.Color("local", theme.Accent)
+	case "PushEvent":
+		return theme.Color("create", theme.Positive)
+	case "PullRequestEvent":
+		return theme.Accent
+	case "PullRequestReviewEvent", "PullRequestReviewCommentEvent":
+		return theme.Color("review", theme.Cursor)
+	case "IssueCommentEvent":
+		return theme.Color("comment", theme.Muted)
+	case "IssuesEvent":
+		return theme.Color("issue", theme.Warn)
+	case "CreateEvent":
+		return theme.Color("create", theme.Positive)
+	case "DeleteEvent":
+		return theme.Color("delete", theme.Negative)
+	case "ReleaseEvent":
+		return theme.Color("release", theme.Flash)
+	case "MemberEvent":
+		return theme.Color("comment", theme.Muted)
+	default:
+		return theme.Muted
+	}
+}
+
+// LabelColor maps a display label back to its themed color.
+func LabelColor(label string, theme blit.Theme) lipgloss.Color {
 	switch label {
 	case "LOCAL":
-		return ColorLocal
+		return theme.Color("local", theme.Accent)
 	case "PUSH":
-		return ColorPush
+		return theme.Color("create", theme.Positive)
 	case "PR":
-		return ColorPR
+		return theme.Accent
 	case "REVIEW":
-		return ColorReview
+		return theme.Color("review", theme.Cursor)
 	case "COMMENT":
-		return ColorComment
+		return theme.Color("comment", theme.Muted)
 	case "ISSUE":
-		return ColorIssue
+		return theme.Color("issue", theme.Warn)
 	case "CREATE":
-		return ColorCreate
+		return theme.Color("create", theme.Positive)
 	case "DELETE":
-		return ColorDelete
+		return theme.Color("delete", theme.Negative)
 	case "RELEASE":
-		return ColorRelease
+		return theme.Color("release", theme.Flash)
 	case "STAR", "FORK":
-		return ColorComment
+		return theme.Color("comment", theme.Muted)
 	default:
-		return ColorDim
+		return theme.Muted
 	}
 }

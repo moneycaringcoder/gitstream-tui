@@ -423,9 +423,9 @@ Config: ~/.config/gitstream/config.yaml
 
 func renderEventDetail(de ui.DisplayEvent, w int, theme blit.Theme) string {
 	ev := de.Event
-	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
-	valStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff"))
-	color := ui.EventColor(ev.Type)
+	labelStyle := lipgloss.NewStyle().Foreground(theme.Muted)
+	valStyle := lipgloss.NewStyle().Foreground(theme.Text)
+	color := ui.EventColor(ev.Type, theme)
 	typeStyle := lipgloss.NewStyle().Foreground(color).Bold(true)
 
 	lines := []string{
@@ -444,7 +444,6 @@ func renderEventDetail(de ui.DisplayEvent, w int, theme blit.Theme) string {
 	detail := ev.Detail()
 	if detail != "" {
 		lines = append(lines, labelStyle.Render("Detail:"))
-		// Word-wrap detail to width
 		maxW := w - 2
 		if maxW < 20 {
 			maxW = 20
@@ -462,6 +461,7 @@ func renderEventDetail(de ui.DisplayEvent, w int, theme blit.Theme) string {
 	if len(ev.Payload.Commits) > 0 {
 		lines = append(lines, "")
 		lines = append(lines, labelStyle.Render("Commits:"))
+		shaStyle := lipgloss.NewStyle().Foreground(theme.Warn)
 		for _, c := range ev.Payload.Commits {
 			sha := c.SHA
 			if len(sha) > 7 {
@@ -475,7 +475,7 @@ func renderEventDetail(de ui.DisplayEvent, w int, theme blit.Theme) string {
 			if maxMsg > 0 && len(msg) > maxMsg {
 				msg = msg[:maxMsg-1] + "…"
 			}
-			lines = append(lines, "  "+lipgloss.NewStyle().Foreground(lipgloss.Color("#ffaa00")).Render(sha)+" "+valStyle.Render(msg))
+			lines = append(lines, "  "+shaStyle.Render(sha)+" "+valStyle.Render(msg))
 		}
 	}
 
@@ -517,9 +517,11 @@ func renderEventDetail(de ui.DisplayEvent, w int, theme blit.Theme) string {
 	if cd := ev.CompareData; cd != nil {
 		lines = append(lines, "")
 		lines = append(lines, labelStyle.Render(fmt.Sprintf("Files changed: %d, Commits: %d", len(cd.Files), cd.TotalCommits)))
+		addStyle := lipgloss.NewStyle().Foreground(theme.Positive)
+		delStyle := lipgloss.NewStyle().Foreground(theme.Negative)
 		for _, f := range cd.Files {
-			adds := lipgloss.NewStyle().Foreground(lipgloss.Color("#22c55e")).Render(fmt.Sprintf("+%d", f.Additions))
-			dels := lipgloss.NewStyle().Foreground(lipgloss.Color("#ef4444")).Render(fmt.Sprintf("-%d", f.Deletions))
+			adds := addStyle.Render(fmt.Sprintf("+%d", f.Additions))
+			dels := delStyle.Render(fmt.Sprintf("-%d", f.Deletions))
 			lines = append(lines, "  "+adds+" "+dels+" "+valStyle.Render(f.Filename))
 		}
 	}

@@ -19,6 +19,7 @@ type DebugOverlay struct {
 	width     int
 	height    int
 	focused   bool
+	theme     blit.Theme
 }
 
 func NewDebugOverlay(debugLog *DebugLog) *DebugOverlay {
@@ -27,6 +28,7 @@ func NewDebugOverlay(debugLog *DebugLog) *DebugOverlay {
 	return &DebugOverlay{
 		logViewer: lv,
 		debugLog:  debugLog,
+		theme:     blit.DefaultTheme(),
 	}
 }
 
@@ -42,16 +44,17 @@ func (d *DebugOverlay) Update(msg tea.Msg, ctx blit.Context) (blit.Component, te
 
 func (d *DebugOverlay) View() string {
 	var b strings.Builder
+	th := d.theme
 
-	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#ffffff")).
+	title := lipgloss.NewStyle().Bold(true).Foreground(th.Text).
 		PaddingLeft(1).Render("─── DEBUG LOG ───")
 	b.WriteString(title + "\n\n")
 
 	stats := d.debugLog.GetStats()
 
-	statsHeader := lipgloss.NewStyle().Foreground(lipgloss.Color("#3b82f6")).Bold(true)
-	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280"))
-	errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#ef4444"))
+	statsHeader := lipgloss.NewStyle().Foreground(th.Accent).Bold(true)
+	dim := lipgloss.NewStyle().Foreground(th.Muted)
+	errStyle := lipgloss.NewStyle().Foreground(th.Negative)
 
 	b.WriteString(statsHeader.Render("  API Stats") + "\n")
 	b.WriteString(dim.Render(fmt.Sprintf("  Total calls:  %d", stats.TotalCalls)) + "\n")
@@ -71,8 +74,8 @@ func (d *DebugOverlay) View() string {
 	if len(stats.RepoHealth) > 0 {
 		b.WriteString("\n")
 		b.WriteString(statsHeader.Render("  Repo Health") + "\n")
-		green := lipgloss.NewStyle().Foreground(lipgloss.Color("#22c55e"))
-		red := lipgloss.NewStyle().Foreground(lipgloss.Color("#ef4444"))
+		green := lipgloss.NewStyle().Foreground(th.Positive)
+		red := lipgloss.NewStyle().Foreground(th.Negative)
 		for repo, h := range stats.RepoHealth {
 			dot := green.Render("●")
 			if !h.LastSuccess {
@@ -111,7 +114,7 @@ func (d *DebugOverlay) SetSize(w, h int) {
 
 func (d *DebugOverlay) Focused() bool     { return d.focused }
 func (d *DebugOverlay) SetFocused(f bool)  { d.focused = f; d.logViewer.SetFocused(f) }
-func (d *DebugOverlay) SetTheme(t blit.Theme) { d.logViewer.SetTheme(t) }
+func (d *DebugOverlay) SetTheme(t blit.Theme) { d.theme = t; d.logViewer.SetTheme(t) }
 func (d *DebugOverlay) IsActive() bool     { return d.active }
 func (d *DebugOverlay) SetActive(v bool)   { d.active = v }
 func (d *DebugOverlay) Close()             { d.active = false }
