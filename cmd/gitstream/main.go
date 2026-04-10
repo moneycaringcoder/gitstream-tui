@@ -9,7 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	tuikit "github.com/moneycaringcoder/tuikit-go"
+	blit "github.com/blitui/blit"
 	"github.com/moneycaringcoder/gitstream-tui/internal/config"
 	"github.com/moneycaringcoder/gitstream-tui/internal/github"
 	"github.com/moneycaringcoder/gitstream-tui/internal/ui"
@@ -78,35 +78,56 @@ func main() {
 		os.Exit(1)
 	}
 
-	tuikit.CleanupOldBinary()
+	blit.CleanupOldBinary()
+
+	// Build theme picker for runtime switching
+	presets := blit.Presets()
+	var pickerItems []blit.PickerItem
+	for name := range presets {
+		n := name
+		pickerItems = append(pickerItems, blit.PickerItem{
+			Title: n,
+			Value: n,
+		})
+	}
+	themePicker := blit.NewPicker(pickerItems, blit.PickerOpts{
+		Placeholder: "Search themes...",
+		OnConfirm: func(item blit.PickerItem) {
+			name := item.Value.(string)
+			if _, ok := presets[name]; ok {
+				cfg.Theme = name
+				config.Save(cfg)
+			}
+		},
+	})
 
 	debugLog := ui.NewDebugLog()
 	stream := ui.NewEventStream(cfg, debugLog)
 	panel := ui.NewStatusPanel()
 	debugOverlay := ui.NewDebugOverlay(debugLog)
 
-	detailOverlay := tuikit.NewDetailOverlay(tuikit.DetailOverlayOpts[ui.DisplayEvent]{
+	detailOverlay := blit.NewDetailOverlay(blit.DetailOverlayOpts[ui.DisplayEvent]{
 		Title: "Event Detail",
-		Render: func(de ui.DisplayEvent, w, h int, theme tuikit.Theme) string {
-			return renderEventDetail(de, w)
+		Render: func(de ui.DisplayEvent, w, h int, theme blit.Theme) string {
+			return renderEventDetail(de, w, theme)
 		},
 		OnKey: func(de ui.DisplayEvent, key tea.KeyMsg) tea.Cmd {
 			if key.String() == "o" {
 				if url := de.Event.URL(); url != "" {
-					tuikit.OpenURL(url)
+					blit.OpenURL(url)
 				}
-				return tuikit.Consumed()
+				return blit.Consumed()
 			}
 			return nil
 		},
-		KeyBindings: []tuikit.KeyBind{
+		KeyBindings: []blit.KeyBind{
 			{Key: "o", Label: "Open in browser", Group: "DETAIL"},
 		},
 	})
 	stream.DetailOverlay = detailOverlay
 
-	// Config editor using tuikit.ConfigEditor
-	configEditor := tuikit.NewConfigEditor([]tuikit.ConfigField{
+	// Config editor using blit.ConfigEditor
+	configEditor := blit.NewConfigEditor([]blit.ConfigField{
 		{
 			Label: "Interval (sec)",
 			Group: "Polling",
@@ -168,13 +189,13 @@ func main() {
 		},
 	})
 
-	// Status bar: left = help hints, right = active filters
-	statusLeft := func() string {
-		return fmt.Sprintf(" ? help  s sort  t type  c config  D debug  p pause  r refresh  1-%d repo  0 clear",
-			len(cfg.Repos()))
-	}
-
-	statusRight := func() string {
+	// Signal-driven status bar. Set() is called via goroutine to avoid
+	// deadlocking — bubbletea's p.msgs is unbuffered, and Signal.Set triggers
+	// bus.schedule → p.Send from the UI goroutine which would block forever.
+	leftSig := blit.NewSignal(
+		" ? help  s sort  t type  c config  D debug  p pause  r refresh  1-5 tab  0 clear")
+	rightSig := blit.NewSignal[string]("")
+	updateStatusRight := func() {
 		var parts []string
 		sortLabel := "oldest"
 		if stream.IsNewestFirst() {
@@ -188,13 +209,127 @@ func main() {
 			ev := github.Event{Type: stream.TypeFilter()}
 			parts = append(parts, "type:"+ev.Label())
 		}
-		return strings.Join(parts, "  ") + " "
+		v := strings.Join(parts, "  ") + " "
+		go rightSig.Set(v)
 	}
+	updateStatusRight()
 
-	app := tuikit.NewApp(
-		tuikit.WithTheme(tuikit.DefaultTheme()),
-		tuikit.WithLayout(&tuikit.DualPane{
-			Main:         stream,
+	// Vim-style command bar
+	cmdBar := blit.NewCommandBar([]blit.Command{
+		{
+			Name: "add", Args: true, Hint: "Add a repo (owner/repo)",
+			Run: func(args string) tea.Cmd {
+				args = strings.TrimSpace(args)
+				if args == "" || !strings.Contains(args, "/") {
+					return nil
+				}
+				cfg.RepoEntries = append(cfg.RepoEntries, config.RepoEntry{Name: args})
+				config.Save(cfg)
+				return nil
+			},
+		},
+		{
+			Name: "remove", Aliases: []string{"rm"}, Args: true, Hint: "Remove a repo",
+			Run: func(args string) tea.Cmd {
+				args = strings.TrimSpace(args)
+				filtered := make([]config.RepoEntry, 0, len(cfg.RepoEntries))
+				for _, r := range cfg.RepoEntries {
+					if r.Name != args {
+						filtered = append(filtered, r)
+					}
+				}
+				cfg.RepoEntries = filtered
+				config.Save(cfg)
+				return nil
+			},
+		},
+		{
+			Name: "sort", Args: true, Hint: "Sort newest|oldest",
+			Run: func(args string) tea.Cmd {
+				args = strings.TrimSpace(args)
+				if args == "newest" && !stream.IsNewestFirst() {
+					stream.ToggleSort()
+					updateStatusRight()
+				} else if args == "oldest" && stream.IsNewestFirst() {
+					stream.ToggleSort()
+					updateStatusRight()
+				}
+				return nil
+			},
+		},
+		{
+			Name: "filter", Args: true, Hint: "filter repo:<name> or type:<type>",
+			Run: func(args string) tea.Cmd {
+				args = strings.TrimSpace(args)
+				if strings.HasPrefix(args, "repo:") {
+					stream.SetRepoFilter(strings.TrimPrefix(args, "repo:"))
+					updateStatusRight()
+				} else if strings.HasPrefix(args, "type:") {
+					stream.SetTypeFilter(strings.TrimPrefix(args, "type:"))
+					updateStatusRight()
+				}
+				return nil
+			},
+		},
+		{
+			Name: "clear", Hint: "Clear all filters",
+			Run: func(_ string) tea.Cmd {
+				stream.ClearFilters()
+				updateStatusRight()
+				return nil
+			},
+		},
+		{
+			Name: "theme", Args: true, Hint: "Set theme by name",
+			Run: func(args string) tea.Cmd {
+				args = strings.TrimSpace(args)
+				if t, ok := presets[args]; ok {
+					cfg.Theme = args
+					config.Save(cfg)
+					return blit.SetThemeCmd(t)
+				}
+				return nil
+			},
+		},
+		{
+			Name: "quit", Aliases: []string{"q"}, Hint: "Quit",
+			Run: func(_ string) tea.Cmd { return tea.Quit },
+		},
+	})
+
+	// Tab bar for event type filtering.
+	// Stream is assigned as Content only to the initial tab; OnChange moves
+	// it into the newly active slot so Tabs.SetFocused doesn't clobber
+	// the shared stream's focus state (last-writer-wins across 5 items).
+	tabItems := []blit.TabItem{
+		{Title: "All", Glyph: "◉", Content: stream},
+		{Title: "Pushes", Glyph: "↑"},
+		{Title: "PRs", Glyph: "⎇"},
+		{Title: "Issues", Glyph: "!"},
+		{Title: "Local", Glyph: "⌂"},
+	}
+	tabs := blit.NewTabs(tabItems, blit.TabsOpts{
+		OnChange: func(idx int) {
+			filters := []string{"", "PushEvent", "PullRequestEvent", "IssuesEvent", "LocalPushEvent"}
+			if idx < len(filters) {
+				stream.SetTypeFilter(filters[idx])
+				updateStatusRight()
+			}
+			// Move stream into the active tab, clear the rest.
+			for i := range tabItems {
+				if i == idx {
+					tabItems[i].Content = stream
+				} else {
+					tabItems[i].Content = nil
+				}
+			}
+		},
+	})
+
+	app := blit.NewApp(
+		blit.WithTheme(resolveTheme(cfg.Theme)),
+		blit.WithLayout(&blit.DualPane{
+			Main:         tabs,
 			Side:         panel,
 			MainName:     "Stream",
 			SideName:     "Local",
@@ -203,59 +338,43 @@ func main() {
 			SideRight:    true,
 			ToggleKey:    "",
 		}),
-		tuikit.WithStatusBar(statusLeft, statusRight),
-		tuikit.WithHelp(),
-		tuikit.WithOverlay("Settings", "c", configEditor),
-		tuikit.WithOverlay("Debug", "D", debugOverlay),
-		tuikit.WithOverlay("Detail", "", detailOverlay),
+		blit.WithStatusBarSignal(leftSig, rightSig),
+		blit.WithHelp(),
+		blit.WithOverlay("Settings", "c", configEditor),
+		blit.WithOverlay("Debug", "D", debugOverlay),
+		blit.WithOverlay("Detail", "", detailOverlay),
+		blit.WithOverlay("Theme", "ctrl+t", themePicker),
+		blit.WithOverlay("Command", ":", cmdBar),
 		// Global keybindings
-		tuikit.WithKeyBind(tuikit.KeyBind{
+		blit.WithKeyBind(blit.KeyBind{
 			Key: "p", Label: "Pause/resume", Group: "CONTROLS",
-			Handler: func() { stream.TogglePause() },
+			Handler: func() { stream.TogglePause(); updateStatusRight() },
 		}),
-		tuikit.WithKeyBind(tuikit.KeyBind{
+		blit.WithKeyBind(blit.KeyBind{
 			Key: "r", Label: "Refresh now", Group: "CONTROLS",
 			Handler: func() { stream.ForceRefresh() },
 		}),
-		tuikit.WithKeyBind(tuikit.KeyBind{
+		blit.WithKeyBind(blit.KeyBind{
 			Key: "s", Label: "Toggle sort", Group: "CONTROLS",
-			Handler: func() { stream.ToggleSort() },
+			Handler: func() { stream.ToggleSort(); updateStatusRight() },
 		}),
-		tuikit.WithKeyBind(tuikit.KeyBind{
+		blit.WithKeyBind(blit.KeyBind{
 			Key: "t", Label: "Type filter →", Group: "FILTER",
-			Handler: func() { stream.CycleTypeFilter(true) },
+			Handler: func() { stream.CycleTypeFilter(true); updateStatusRight() },
 		}),
-		tuikit.WithKeyBind(tuikit.KeyBind{
+		blit.WithKeyBind(blit.KeyBind{
 			Key: "T", Label: "Type filter ←", Group: "FILTER",
-			Handler: func() { stream.CycleTypeFilter(false) },
+			Handler: func() { stream.CycleTypeFilter(false); updateStatusRight() },
 		}),
-		tuikit.WithKeyBind(tuikit.KeyBind{
+		blit.WithKeyBind(blit.KeyBind{
 			Key: "0", Label: "Clear filters", Group: "FILTER",
-			Handler: func() { stream.ClearFilters() },
+			Handler: func() { stream.ClearFilters(); updateStatusRight() },
 		}),
-		tuikit.WithMouseSupport(),
-		tuikit.WithTickInterval(time.Second),
-		tuikit.WithAutoUpdate(updatewire.New(version)),
+		blit.WithMouseSupport(),
+		blit.WithTickInterval(time.Second),
+		blit.WithAutoUpdate(updatewire.New(version)),
 	)
 
-	// Register repo number filters (1-9)
-	for i := 1; i <= 9; i++ {
-		idx := i - 1
-		app.AddKeyBind(tuikit.KeyBind{
-			Key: fmt.Sprintf("%d", i), Label: fmt.Sprintf("Filter repo %d", i), Group: "FILTER",
-			Handler: func() {
-				repos := cfg.Repos()
-				if idx < len(repos) {
-					repo := repos[idx]
-					short := repo
-					if j := strings.LastIndex(repo, "/"); j >= 0 {
-						short = repo[j+1:]
-					}
-					stream.SetRepoFilter(short)
-				}
-			},
-		})
-	}
 
 	if err := app.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -293,7 +412,7 @@ Config: ~/.config/gitstream/config.yaml
 `)
 }
 
-func renderEventDetail(de ui.DisplayEvent, w int) string {
+func renderEventDetail(de ui.DisplayEvent, w int, theme blit.Theme) string {
 	ev := de.Event
 	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
 	valStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff"))
@@ -356,18 +475,33 @@ func renderEventDetail(de ui.DisplayEvent, w int) string {
 		lines = append(lines, "")
 		lines = append(lines, labelStyle.Render("PR:      ")+valStyle.Render(fmt.Sprintf("#%d %s", pr.Number, pr.Title)))
 		lines = append(lines, labelStyle.Render("State:   ")+valStyle.Render(pr.State))
+		if pr.Body != "" {
+			lines = append(lines, "")
+			lines = append(lines, labelStyle.Render("Description:"))
+			lines = append(lines, blit.Markdown(pr.Body, theme))
+		}
 	}
 
 	// Issue info
 	if issue := ev.Payload.Issue; issue != nil {
 		lines = append(lines, "")
 		lines = append(lines, labelStyle.Render("Issue:   ")+valStyle.Render(fmt.Sprintf("#%d %s", issue.Number, issue.Title)))
+		if issue.Body != "" {
+			lines = append(lines, "")
+			lines = append(lines, labelStyle.Render("Description:"))
+			lines = append(lines, blit.Markdown(issue.Body, theme))
+		}
 	}
 
 	// Release info
 	if rel := ev.Payload.Release; rel != nil {
 		lines = append(lines, "")
 		lines = append(lines, labelStyle.Render("Release: ")+valStyle.Render(rel.TagName+" — "+rel.Name))
+		if rel.Body != "" {
+			lines = append(lines, "")
+			lines = append(lines, labelStyle.Render("Release Notes:"))
+			lines = append(lines, blit.Markdown(rel.Body, theme))
+		}
 	}
 
 	// Compare data (diff stats)
@@ -382,4 +516,15 @@ func renderEventDetail(de ui.DisplayEvent, w int) string {
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+func resolveTheme(name string) blit.Theme {
+	if name == "" {
+		return blit.DefaultTheme()
+	}
+	presets := blit.Presets()
+	if t, ok := presets[name]; ok {
+		return t
+	}
+	return blit.DefaultTheme()
 }

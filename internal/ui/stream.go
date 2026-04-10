@@ -8,7 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	tuikit "github.com/moneycaringcoder/tuikit-go"
+	blit "github.com/blitui/blit"
 	"github.com/moneycaringcoder/gitstream-tui/internal/config"
 	"github.com/moneycaringcoder/gitstream-tui/internal/discovery"
 	"github.com/moneycaringcoder/gitstream-tui/internal/github"
@@ -28,18 +28,19 @@ var typeFilters = []string{
 	"ReleaseEvent",
 }
 
-// EventStream displays a scrollable list of GitHub events.
-// Implements tuikit.Component.
+// EventStream displays a scrollable table of GitHub events.
+// Implements blit.Component.
 type EventStream struct {
 	cfg      *config.Config
 	debugLog *DebugLog
 
-	allEvents     []DisplayEvent
-	seen          map[string]bool
-	seenLocalSHAs map[string]bool
+	allEvents      []DisplayEvent
+	filteredEvents []DisplayEvent // parallel slice for row-click lookup
+	seen           map[string]bool
+	seenLocalSHAs  map[string]bool
 
-	listView *tuikit.ListView[DisplayEvent]
-	poller   *tuikit.Poller
+	table  *blit.Table
+	poller *blit.Poller
 
 	filter     string // repo name filter
 	typeFilter string // event type filter
@@ -51,36 +52,72 @@ type EventStream struct {
 	focused bool
 	width   int
 
-	DetailOverlay *tuikit.DetailOverlay[DisplayEvent]
+	epmWindow       []float64  // events-per-minute rolling window (last 30 points)
+	lastEPMTick     time.Time
+	currentMinCount int
+
+	DetailOverlay *blit.DetailOverlay[DisplayEvent]
 }
 
 func NewEventStream(cfg *config.Config, debugLog *DebugLog) *EventStream {
 	s := &EventStream{
-		cfg:           cfg,
-		debugLog:      debugLog,
-		seen:          make(map[string]bool),
-		seenLocalSHAs: make(map[string]bool),
-		allEvents:     make([]DisplayEvent, 0, 256),
-		knownRepos:    append([]string{}, cfg.Repos()...),
+		cfg:            cfg,
+		debugLog:       debugLog,
+		seen:           make(map[string]bool),
+		seenLocalSHAs:  make(map[string]bool),
+		allEvents:      make([]DisplayEvent, 0, 256),
+		filteredEvents: make([]DisplayEvent, 0, 256),
+		knownRepos:     append([]string{}, cfg.Repos()...),
 	}
 
-	s.listView = tuikit.NewListView(tuikit.ListViewOpts[DisplayEvent]{
-		RenderItem: func(item DisplayEvent, idx int, isCursor bool, theme tuikit.Theme) string {
-			return renderEventLine(item.Event, time.Now())
+	columns := []blit.Column{
+		{Title: "Time", Width: 2, MaxWidth: 20},
+		{Title: "Repo", Width: 2, MaxWidth: 18},
+		{Title: "Type", Width: 1, MaxWidth: 10},
+		{Title: "Actor", Width: 2, MaxWidth: 22},
+		{Title: "Detail", Width: 5},
+	}
+
+	s.table = blit.NewTable(columns, nil, blit.TableOpts{
+		Filterable: true,
+		CellRenderer: func(row blit.Row, colIdx int, isCursor bool, theme blit.Theme) string {
+			if colIdx >= len(row) {
+				return ""
+			}
+			switch colIdx {
+			case 0: // Time - dim gray
+				return lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Render(row[colIdx])
+			case 2: // Type - colored badge
+				return blit.Badge(row[colIdx], LabelColor(row[colIdx]), true)
+			default:
+				return row[colIdx]
+			}
 		},
-		HeaderFunc: func(theme tuikit.Theme) string {
-			return s.renderHeader()
+		RowStyler: func(row blit.Row, idx int, isCursor bool, theme blit.Theme) *lipgloss.Style {
+			if idx < len(s.filteredEvents) {
+				de := s.filteredEvents[idx]
+				if !de.AddedAt.IsZero() && time.Now().Before(de.AddedAt.Add(flashDuration)) {
+					st := lipgloss.NewStyle().Background(lipgloss.Color("#1a2a1a"))
+					return &st
+				}
+			}
+			return nil
 		},
-		DetailFunc: func(item DisplayEvent, theme tuikit.Theme) string {
-			return s.renderDetailBar(item, theme)
+		OnRowClick: func(row blit.Row, rowIdx int) {
+			if rowIdx < len(s.filteredEvents) && s.DetailOverlay != nil {
+				s.DetailOverlay.Show(s.filteredEvents[rowIdx])
+			}
 		},
-		FlashFunc: func(item DisplayEvent, now time.Time) bool {
-			return !item.AddedAt.IsZero() && now.Before(item.AddedAt.Add(flashDuration))
+		DetailFunc: func(row blit.Row, rowIdx int, width int, theme blit.Theme) string {
+			if rowIdx < len(s.filteredEvents) {
+				return s.renderDetailBar(s.filteredEvents[rowIdx], theme)
+			}
+			return ""
 		},
 		DetailHeight: 3,
 	})
 
-	s.poller = tuikit.NewPoller(
+	s.poller = blit.NewPoller(
 		time.Duration(cfg.Interval)*time.Second,
 		func() tea.Cmd {
 			cmds := []tea.Cmd{pollEvents(cfg, debugLog, false)}
@@ -101,31 +138,46 @@ func (s *EventStream) Init() tea.Cmd {
 	)
 }
 
-func (s *EventStream) Update(msg tea.Msg) (tuikit.Component, tea.Cmd) {
+func (s *EventStream) Update(msg tea.Msg, ctx blit.Context) (blit.Component, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		// Enter opens detail overlay instead of browser
 		if msg.String() == "enter" && s.DetailOverlay != nil {
-			if item := s.listView.CursorItem(); item != nil {
-				s.DetailOverlay.Show(*item)
-				return s, tuikit.Consumed()
+			idx := s.table.CursorIndex()
+			if idx >= 0 && idx < len(s.filteredEvents) {
+				s.DetailOverlay.Show(s.filteredEvents[idx])
+				return s, blit.Consumed()
 			}
 		}
 		// 'o' opens in browser
 		if msg.String() == "o" {
-			if item := s.listView.CursorItem(); item != nil {
-				if url := item.Event.URL(); url != "" {
-					tuikit.OpenURL(url)
+			idx := s.table.CursorIndex()
+			if idx >= 0 && idx < len(s.filteredEvents) {
+				if url := s.filteredEvents[idx].Event.URL(); url != "" {
+					blit.OpenURL(url)
 				}
-				return s, tuikit.Consumed()
+				return s, blit.Consumed()
 			}
 		}
-		cmd := s.listView.HandleKey(msg)
+		// Let table handle its own keys (cursor, search, etc.)
+		comp, cmd := s.table.Update(msg, ctx)
+		_ = comp
 		return s, cmd
 
-	case tuikit.TickMsg:
-		s.listView.Refresh()
+	case blit.TickMsg:
 		s.poller.SetInterval(time.Duration(s.cfg.Interval) * time.Second)
+
+		// EPM window rotation
+		if s.lastEPMTick.IsZero() {
+			s.lastEPMTick = msg.Time
+		} else if msg.Time.Sub(s.lastEPMTick) >= time.Minute {
+			s.epmWindow = append(s.epmWindow, float64(s.currentMinCount))
+			if len(s.epmWindow) > 30 {
+				s.epmWindow = s.epmWindow[1:]
+			}
+			s.currentMinCount = 0
+			s.lastEPMTick = msg.Time
+		}
 
 		// Check if repos changed (config editor modified them)
 		currentRepos := s.cfg.Repos()
@@ -155,7 +207,7 @@ func (s *EventStream) Update(msg tea.Msg) (tuikit.Component, tea.Cmd) {
 	return s, nil
 }
 
-func (s *EventStream) handleEvents(msg eventsMsg) (tuikit.Component, tea.Cmd) {
+func (s *EventStream) handleEvents(msg eventsMsg) (blit.Component, tea.Cmd) {
 	for _, e := range msg.errors {
 		s.debugLog.Error("%s", e)
 	}
@@ -176,6 +228,7 @@ func (s *EventStream) handleEvents(msg eventsMsg) (tuikit.Component, tea.Cmd) {
 		s.allEvents = append(s.allEvents, DisplayEvent{Event: ev, AddedAt: addedAt})
 		newCount++
 	}
+	s.currentMinCount += newCount
 	if newCount > 0 {
 		sort.Slice(s.allEvents, func(i, j int) bool {
 			return s.allEvents[i].Event.CreatedAt.Before(s.allEvents[j].Event.CreatedAt)
@@ -184,16 +237,33 @@ func (s *EventStream) handleEvents(msg eventsMsg) (tuikit.Component, tea.Cmd) {
 		s.rebuildFiltered()
 		if atEdge {
 			if s.newestFirst {
-				s.listView.ScrollToTop()
+				s.table.SetCursor(0)
 			} else {
-				s.listView.ScrollToBottom()
+				s.table.SetCursor(len(s.filteredEvents) - 1)
 			}
 		}
 	}
-	return s, nil
+
+	var cmds []tea.Cmd
+
+	if newCount > 0 && !s.isAtNewEdge() {
+		cmds = append(cmds, blit.ToastCmd(blit.SeverityInfo, "New events",
+			fmt.Sprintf("%d new events arrived", newCount), 3*time.Second))
+	}
+
+	stats := s.debugLog.GetStats()
+	if stats.RateLimit > 0 {
+		ratePct := float64(stats.RateRemain) / float64(stats.RateLimit) * 100
+		if ratePct < 20 {
+			cmds = append(cmds, blit.ToastCmd(blit.SeverityWarn, "Rate limit low",
+				fmt.Sprintf("API rate limit at %.0f%%", ratePct), 5*time.Second))
+		}
+	}
+
+	return s, tea.Batch(cmds...)
 }
 
-func (s *EventStream) handleGitStatus(msg gitStatusMsg) (tuikit.Component, tea.Cmd) {
+func (s *EventStream) handleGitStatus(msg gitStatusMsg) (blit.Component, tea.Cmd) {
 	now := time.Now()
 	newLocal := 0
 	for _, st := range msg.statuses {
@@ -234,9 +304,9 @@ func (s *EventStream) handleGitStatus(msg gitStatusMsg) (tuikit.Component, tea.C
 		s.rebuildFiltered()
 		if atEdge {
 			if s.newestFirst {
-				s.listView.ScrollToTop()
+				s.table.SetCursor(0)
 			} else {
-				s.listView.ScrollToBottom()
+				s.table.SetCursor(len(s.filteredEvents) - 1)
 			}
 		}
 	}
@@ -244,7 +314,8 @@ func (s *EventStream) handleGitStatus(msg gitStatusMsg) (tuikit.Component, tea.C
 }
 
 func (s *EventStream) View() string {
-	return s.listView.View()
+	header := s.renderHeader()
+	return header + "\n\n" + s.table.View()
 }
 
 func (s *EventStream) renderHeader() string {
@@ -288,14 +359,18 @@ func (s *EventStream) renderHeader() string {
 		statusParts = append(statusParts, lipgloss.NewStyle().Foreground(rateColor).Render(
 			fmt.Sprintf("API %d/%d", stats.RateRemain, stats.RateLimit)))
 	}
+	if len(s.epmWindow) >= 2 {
+		spark, _ := blit.Sparkline(s.epmWindow, 30, nil)
+		statusParts = append(statusParts, "Activity: "+spark)
+	}
 	status := SubtitleStyle.Render(strings.Join(statusParts, "  "))
 
-	return lipgloss.JoinVertical(lipgloss.Left, title, repoList, status, "")
+	return lipgloss.JoinVertical(lipgloss.Left, title, repoList, status)
 }
 
-func (s *EventStream) renderDetailBar(de DisplayEvent, theme tuikit.Theme) string {
+func (s *EventStream) renderDetailBar(de DisplayEvent, theme blit.Theme) string {
 	ev := de.Event
-	divider := tuikit.Divider(s.width, theme)
+	divider := blit.Divider(s.width, theme)
 
 	repo := ev.Repo.Name
 	label := ev.Label()
@@ -304,13 +379,13 @@ func (s *EventStream) renderDetailBar(de DisplayEvent, theme tuikit.Theme) strin
 	color := EventColor(ev.Type)
 
 	line1 := fmt.Sprintf(" %s  %s  %s  %s",
-		DetailLabelStyle(color).Render(label),
+		blit.Badge(label, color, true),
 		DetailRepoStyle.Render(repo),
 		DetailActorStyle.Render(actor),
 		DetailTimeStyle.Render(t),
 	)
 
-	detail := tuikit.Truncate(ev.Detail(), s.width-20)
+	detail := blit.Truncate(ev.Detail(), s.width-20)
 	urlHint := ""
 	if url := ev.URL(); url != "" {
 		urlHint = DetailTimeStyle.Render("  ↵ open")
@@ -320,24 +395,31 @@ func (s *EventStream) renderDetailBar(de DisplayEvent, theme tuikit.Theme) strin
 	return divider + "\n" + line1 + "\n" + line2
 }
 
-func (s *EventStream) KeyBindings() []tuikit.KeyBind {
-	bindings := s.listView.KeyBindings()
+func (s *EventStream) KeyBindings() []blit.KeyBind {
+	bindings := s.table.KeyBindings()
 	bindings = append(bindings,
-		tuikit.KeyBind{Key: "enter", Label: "Event detail", Group: "NAVIGATION"},
-		tuikit.KeyBind{Key: "o", Label: "Open in browser", Group: "NAVIGATION"},
+		blit.KeyBind{Key: "enter", Label: "Event detail", Group: "NAVIGATION"},
+		blit.KeyBind{Key: "o", Label: "Open in browser", Group: "NAVIGATION"},
 	)
 	return bindings
 }
 
 func (s *EventStream) SetSize(w, h int) {
 	s.width = w
-	s.listView.SetSize(w, h)
+	headerHeight := 4
+	s.table.SetSize(w, h-headerHeight)
 }
 
 func (s *EventStream) Focused() bool       { return s.focused }
 func (s *EventStream) SetFocused(f bool) {
 	s.focused = f
-	s.listView.SetFocused(f)
+	s.table.SetFocused(f)
+}
+
+// SetTheme implements blit.Themed so the App's theme propagates through
+// Tabs → EventStream → Table.
+func (s *EventStream) SetTheme(t blit.Theme) {
+	s.table.SetTheme(t)
 }
 
 // Public methods for app-level keybinding handlers.
@@ -348,6 +430,11 @@ func (s *EventStream) SetRepoFilter(repo string) {
 	} else {
 		s.filter = repo
 	}
+	s.rebuildFiltered()
+}
+
+func (s *EventStream) SetTypeFilter(t string) {
+	s.typeFilter = t
 	s.rebuildFiltered()
 }
 
@@ -377,9 +464,9 @@ func (s *EventStream) ToggleSort() {
 	s.newestFirst = !s.newestFirst
 	s.rebuildFiltered()
 	if s.newestFirst {
-		s.listView.ScrollToTop()
+		s.table.SetCursor(0)
 	} else {
-		s.listView.ScrollToBottom()
+		s.table.SetCursor(len(s.filteredEvents) - 1)
 	}
 }
 
@@ -405,28 +492,34 @@ func (s *EventStream) skipEvent(de DisplayEvent) bool {
 }
 
 func (s *EventStream) rebuildFiltered() {
-	var filtered []DisplayEvent
+	s.filteredEvents = s.filteredEvents[:0]
 	if s.newestFirst {
 		for i := len(s.allEvents) - 1; i >= 0; i-- {
 			if !s.skipEvent(s.allEvents[i]) {
-				filtered = append(filtered, s.allEvents[i])
+				s.filteredEvents = append(s.filteredEvents, s.allEvents[i])
 			}
 		}
 	} else {
 		for _, de := range s.allEvents {
 			if !s.skipEvent(de) {
-				filtered = append(filtered, de)
+				s.filteredEvents = append(s.filteredEvents, de)
 			}
 		}
 	}
-	s.listView.SetItems(filtered)
+	rows := make([]blit.Row, len(s.filteredEvents))
+	for i, de := range s.filteredEvents {
+		rows[i] = eventToRow(de)
+	}
+	s.table.SetRows(rows)
 }
 
 func (s *EventStream) isAtNewEdge() bool {
+	total := len(s.filteredEvents)
+	idx := s.table.CursorIndex()
 	if s.newestFirst {
-		return s.listView.IsAtTop()
+		return idx == 0
 	}
-	return s.listView.IsAtBottom()
+	return idx >= total-1
 }
 
 func slicesEqual(a, b []string) bool {

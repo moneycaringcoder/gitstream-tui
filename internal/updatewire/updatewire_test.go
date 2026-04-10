@@ -3,15 +3,15 @@ package updatewire
 import (
 	"testing"
 
-	tuikit "github.com/moneycaringcoder/tuikit-go"
-	"github.com/moneycaringcoder/tuikit-go/updatetest"
+	blit "github.com/blitui/blit"
+	"github.com/blitui/blit/updatetest"
 )
 
 // TestNew_DefaultsAreForced asserts the consumer wiring uses UpdateForced
 // so a minimum_version marker in release notes promotes the update gate.
 func TestNew_DefaultsAreForced(t *testing.T) {
 	cfg := New("v0.0.0")
-	if cfg.Mode != tuikit.UpdateForced {
+	if cfg.Mode != blit.UpdateForced {
 		t.Errorf("mode = %v, want UpdateForced", cfg.Mode)
 	}
 	if cfg.BinaryName != "gitstream" {
@@ -35,7 +35,7 @@ func TestCheckForUpdate_NewerVersionAvailable(t *testing.T) {
 	defer srv.Close()
 
 	cfg := NewWithBaseURL("v0.5.0", srv.URL, t.TempDir())
-	res, err := tuikit.CheckForUpdate(cfg)
+	res, err := blit.CheckForUpdate(cfg)
 	if err != nil {
 		t.Fatalf("CheckForUpdate: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestCheckForUpdate_CurrentVersionNoGate(t *testing.T) {
 	defer srv.Close()
 
 	cfg := NewWithBaseURL("v1.0.0", srv.URL, t.TempDir())
-	res, err := tuikit.CheckForUpdate(cfg)
+	res, err := blit.CheckForUpdate(cfg)
 	if err != nil {
 		t.Fatalf("CheckForUpdate: %v", err)
 	}
@@ -83,10 +83,10 @@ func TestCheckForUpdate_SkippedVersionNoGate(t *testing.T) {
 	defer srv.Close()
 
 	cfg := NewWithBaseURL("v0.5.0", srv.URL, t.TempDir())
-	if err := tuikit.SkipVersion(cfg, "v1.0.0"); err != nil {
+	if err := blit.SkipVersion(cfg, "v1.0.0"); err != nil {
 		t.Fatalf("SkipVersion: %v", err)
 	}
-	res, err := tuikit.CheckForUpdate(cfg)
+	res, err := blit.CheckForUpdate(cfg)
 	if err != nil {
 		t.Fatalf("CheckForUpdate: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestCheckForUpdate_DisabledShortCircuits(t *testing.T) {
 
 	cfg := NewWithBaseURL("v0.5.0", srv.URL, t.TempDir())
 	cfg.Disabled = true
-	res, err := tuikit.CheckForUpdate(cfg)
+	res, err := blit.CheckForUpdate(cfg)
 	if err != nil {
 		t.Fatalf("CheckForUpdate: %v", err)
 	}

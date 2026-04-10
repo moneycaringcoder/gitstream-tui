@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
+	blit "github.com/blitui/blit"
 )
 
 const maxLogEntries = 200
@@ -28,9 +28,10 @@ type LogEntry struct {
 
 // DebugLog is a thread-safe circular log buffer.
 type DebugLog struct {
-	mu      sync.Mutex
-	entries []LogEntry
-	stats   FetchStats
+	mu        sync.Mutex
+	entries   []LogEntry
+	stats     FetchStats
+	logViewer *blit.LogViewer
 }
 
 // RepoHealth tracks per-repo fetch health.
@@ -58,17 +59,44 @@ func NewDebugLog() *DebugLog {
 	}
 }
 
+// SetLogViewer wires a blit.LogViewer so that new log entries are also appended to it.
+func (d *DebugLog) SetLogViewer(lv *blit.LogViewer) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.logViewer = lv
+}
+
+// mapLevel converts a ui.LogLevel to a blit.LogLevel.
+func mapLevel(l LogLevel) blit.LogLevel {
+	switch l {
+	case LogWarn:
+		return blit.LogWarn
+	case LogError:
+		return blit.LogError
+	default:
+		return blit.LogInfo
+	}
+}
+
 func (d *DebugLog) Log(level LogLevel, format string, args ...interface{}) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	now := time.Now()
 	msg := fmt.Sprintf(format, args...)
 	d.entries = append(d.entries, LogEntry{
-		Time:    time.Now(),
+		Time:    now,
 		Level:   level,
 		Message: msg,
 	})
 	if len(d.entries) > maxLogEntries {
 		d.entries = d.entries[len(d.entries)-maxLogEntries:]
+	}
+	if d.logViewer != nil {
+		d.logViewer.Append(blit.LogLine{
+			Level:     mapLevel(level),
+			Timestamp: now,
+			Message:   msg,
+		})
 	}
 }
 
@@ -124,16 +152,3 @@ func (d *DebugLog) GetEntries() []LogEntry {
 	return cp
 }
 
-var (
-	logInfoStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#6b7280"))
-	logWarnStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#eab308"))
-	logErrorStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#ef4444"))
-	logTimeStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#4b5563"))
-	logStatsStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#3b82f6")).
-			Bold(true)
-)

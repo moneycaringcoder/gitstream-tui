@@ -83,7 +83,7 @@ interval: 30  # polling interval in seconds
 
 ## Built With
 
-- [tuikit-go](https://github.com/moneycaringcoder/tuikit-go) - TUI component toolkit
+- [blit](https://github.com/blitui/blit) - TUI component toolkit
 - [Bubble Tea](https://github.com/charmbracelet/bubbletea) - TUI framework
 - [Lip Gloss](https://github.com/charmbracelet/lipgloss) - Styling
 - GitHub REST API via `gh` CLI auth

@@ -45,9 +45,6 @@ var (
 			Foreground(ColorDim).
 			PaddingLeft(1)
 
-	HelpStyle = lipgloss.NewStyle().
-			Foreground(ColorDim)
-
 	// Status panel styles
 	PanelBorderStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
@@ -122,15 +119,30 @@ func EventColor(eventType string) lipgloss.Color {
 	}
 }
 
-// LabelStyle returns a styled label for a given event type.
-func LabelStyle(eventType string) lipgloss.Style {
-	return lipgloss.NewStyle().
-		Foreground(EventColor(eventType)).
-		Width(9).
-		Bold(true)
-}
-
-// DetailLabelStyle returns a bold label style with a given color.
-func DetailLabelStyle(color lipgloss.Color) lipgloss.Style {
-	return lipgloss.NewStyle().Bold(true).Foreground(color)
+// LabelColor maps a display label (e.g. "PUSH", "PR") back to its color.
+func LabelColor(label string) lipgloss.Color {
+	switch label {
+	case "LOCAL":
+		return ColorLocal
+	case "PUSH":
+		return ColorPush
+	case "PR":
+		return ColorPR
+	case "REVIEW":
+		return ColorReview
+	case "COMMENT":
+		return ColorComment
+	case "ISSUE":
+		return ColorIssue
+	case "CREATE":
+		return ColorCreate
+	case "DELETE":
+		return ColorDelete
+	case "RELEASE":
+		return ColorRelease
+	case "STAR", "FORK":
+		return ColorComment
+	default:
+		return ColorDim
+	}
 }

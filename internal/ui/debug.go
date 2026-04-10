@@ -7,27 +7,37 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	tuikit "github.com/moneycaringcoder/tuikit-go"
+	blit "github.com/blitui/blit"
 )
 
-// DebugOverlay shows API stats and recent log entries.
-// Implements tuikit.Overlay.
+// DebugOverlay shows API stats and recent log entries using blit.LogViewer.
+// Implements blit.Component and blit.Overlay.
 type DebugOverlay struct {
-	debugLog *DebugLog
-	active   bool
-	width    int
-	height   int
-	focused  bool
+	logViewer *blit.LogViewer
+	debugLog  *DebugLog
+	active    bool
+	width     int
+	height    int
+	focused   bool
 }
 
 func NewDebugOverlay(debugLog *DebugLog) *DebugOverlay {
-	return &DebugOverlay{debugLog: debugLog}
+	lv := blit.NewLogViewer()
+	debugLog.SetLogViewer(lv)
+	return &DebugOverlay{
+		logViewer: lv,
+		debugLog:  debugLog,
+	}
 }
 
 func (d *DebugOverlay) Init() tea.Cmd { return nil }
 
-func (d *DebugOverlay) Update(msg tea.Msg) (tuikit.Component, tea.Cmd) {
-	return d, nil
+func (d *DebugOverlay) Update(msg tea.Msg, ctx blit.Context) (blit.Component, tea.Cmd) {
+	comp, cmd := d.logViewer.Update(msg, ctx)
+	if lv, ok := comp.(*blit.LogViewer); ok {
+		d.logViewer = lv
+	}
+	return d, cmd
 }
 
 func (d *DebugOverlay) View() string {
@@ -38,71 +48,70 @@ func (d *DebugOverlay) View() string {
 	b.WriteString(title + "\n\n")
 
 	stats := d.debugLog.GetStats()
-	b.WriteString(logStatsStyle.Render("  API Stats") + "\n")
-	b.WriteString(logInfoStyle.Render(fmt.Sprintf("  Total calls:  %d", stats.TotalCalls)) + "\n")
-	b.WriteString(logInfoStyle.Render(fmt.Sprintf("  Successful:   %d", stats.SuccessCalls)) + "\n")
+
+	statsHeader := lipgloss.NewStyle().Foreground(lipgloss.Color("#3b82f6")).Bold(true)
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280"))
+	errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#ef4444"))
+
+	b.WriteString(statsHeader.Render("  API Stats") + "\n")
+	b.WriteString(dim.Render(fmt.Sprintf("  Total calls:  %d", stats.TotalCalls)) + "\n")
+	b.WriteString(dim.Render(fmt.Sprintf("  Successful:   %d", stats.SuccessCalls)) + "\n")
 	if stats.FailedCalls > 0 {
-		b.WriteString(logErrorStyle.Render(fmt.Sprintf("  Failed:       %d", stats.FailedCalls)) + "\n")
+		b.WriteString(errStyle.Render(fmt.Sprintf("  Failed:       %d", stats.FailedCalls)) + "\n")
 	} else {
-		b.WriteString(logInfoStyle.Render(fmt.Sprintf("  Failed:       %d", stats.FailedCalls)) + "\n")
+		b.WriteString(dim.Render(fmt.Sprintf("  Failed:       %d", stats.FailedCalls)) + "\n")
 	}
-	b.WriteString(logInfoStyle.Render(fmt.Sprintf("  Total events: %d", stats.TotalEvents)) + "\n")
+	b.WriteString(dim.Render(fmt.Sprintf("  Total events: %d", stats.TotalEvents)) + "\n")
 	if !stats.LastFetchAt.IsZero() {
 		ago := time.Since(stats.LastFetchAt).Truncate(time.Second)
-		b.WriteString(logInfoStyle.Render(fmt.Sprintf("  Last fetch:   %s ago", ago)) + "\n")
+		b.WriteString(dim.Render(fmt.Sprintf("  Last fetch:   %s ago", ago)) + "\n")
 	}
-	b.WriteString("\n")
 
-	b.WriteString(logStatsStyle.Render("  Recent Log") + "\n")
-
-	entries := d.debugLog.GetEntries()
-	maxShow := d.height - 14
-	if maxShow < 5 {
-		maxShow = 5
-	}
-	start := 0
-	if len(entries) > maxShow {
-		start = len(entries) - maxShow
-	}
-	for i := len(entries) - 1; i >= start; i-- {
-		e := entries[i]
-		ts := logTimeStyle.Render(e.Time.Format("15:04:05"))
-		var levelStyle lipgloss.Style
-		var prefix string
-		switch e.Level {
-		case LogInfo:
-			levelStyle = logInfoStyle
-			prefix = "INFO"
-		case LogWarn:
-			levelStyle = logWarnStyle
-			prefix = "WARN"
-		case LogError:
-			levelStyle = logErrorStyle
-			prefix = "ERR "
+	// Repo health dots
+	if len(stats.RepoHealth) > 0 {
+		b.WriteString("\n")
+		b.WriteString(statsHeader.Render("  Repo Health") + "\n")
+		green := lipgloss.NewStyle().Foreground(lipgloss.Color("#22c55e"))
+		red := lipgloss.NewStyle().Foreground(lipgloss.Color("#ef4444"))
+		for repo, h := range stats.RepoHealth {
+			dot := green.Render("●")
+			if !h.LastSuccess {
+				dot = red.Render("●")
+			}
+			b.WriteString(fmt.Sprintf("  %s %s", dot, dim.Render(repo)) + "\n")
 		}
-		line := fmt.Sprintf("  %s %s %s", ts, levelStyle.Render(prefix), levelStyle.Render(e.Message))
-		b.WriteString(line + "\n")
 	}
 
-	if len(entries) == 0 {
-		b.WriteString(logInfoStyle.Render("  No log entries yet") + "\n")
+	// Rate limit
+	if stats.RateLimit > 0 {
+		b.WriteString(dim.Render(fmt.Sprintf("  Rate limit:   %d/%d", stats.RateRemain, stats.RateLimit)) + "\n")
 	}
 
 	b.WriteString("\n")
-	b.WriteString(HelpStyle.PaddingLeft(2).Render("esc close | q quit") + "\n")
+	b.WriteString(d.logViewer.View())
 
 	return b.String()
 }
 
-func (d *DebugOverlay) KeyBindings() []tuikit.KeyBind {
-	return []tuikit.KeyBind{
-		{Key: "D", Label: "Debug log", Group: "OTHER"},
-	}
+func (d *DebugOverlay) KeyBindings() []blit.KeyBind {
+	return d.logViewer.KeyBindings()
 }
 
-func (d *DebugOverlay) SetSize(w, h int)    { d.width = w; d.height = h }
-func (d *DebugOverlay) Focused() bool       { return d.focused }
-func (d *DebugOverlay) SetFocused(f bool)   { d.focused = f }
-func (d *DebugOverlay) IsActive() bool      { return d.active }
-func (d *DebugOverlay) SetActive(v bool)    { d.active = v }
-func (d *DebugOverlay) Close()              { d.active = false }
+func (d *DebugOverlay) SetSize(w, h int) {
+	d.width = w
+	d.height = h
+	// Reserve lines for the stats header; give the rest to the log viewer
+	headerLines := 12
+	lvHeight := h - headerLines
+	if lvHeight < 4 {
+		lvHeight = 4
+	}
+	d.logViewer.SetSize(w, lvHeight)
+}
+
+func (d *DebugOverlay) Focused() bool     { return d.focused }
+func (d *DebugOverlay) SetFocused(f bool)  { d.focused = f; d.logViewer.SetFocused(f) }
+func (d *DebugOverlay) SetTheme(t blit.Theme) { d.logViewer.SetTheme(t) }
+func (d *DebugOverlay) IsActive() bool     { return d.active }
+func (d *DebugOverlay) SetActive(v bool)   { d.active = v }
+func (d *DebugOverlay) Close()             { d.active = false }

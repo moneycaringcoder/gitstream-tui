@@ -51,11 +51,13 @@ type PullRequest struct {
 	Number int    `json:"number"`
 	Title  string `json:"title"`
 	State  string `json:"state"`
+	Body   string `json:"body"`
 }
 
 type Issue struct {
 	Number int    `json:"number"`
 	Title  string `json:"title"`
+	Body   string `json:"body"`
 }
 
 type Comment struct {
@@ -65,6 +67,7 @@ type Comment struct {
 type Release struct {
 	TagName string `json:"tag_name"`
 	Name    string `json:"name"`
+	Body    string `json:"body"`
 }
 
 // CompareResult holds diff stats from the compare API.
