@@ -133,14 +133,17 @@ func main() {
 			Group: "Polling",
 			Hint:  "How often to poll GitHub for new events (min 5)",
 			Get:   func() string { return strconv.Itoa(cfg.Interval) },
-			Set: func(v string) error {
+			Validate: func(v string) error {
 				n, err := strconv.Atoi(v)
 				if err != nil || n < 5 {
 					return fmt.Errorf("must be a number >= 5")
 				}
-				cfg.Interval = n
-				config.Save(cfg)
 				return nil
+			},
+			Set: func(v string) error {
+				n, _ := strconv.Atoi(v)
+				cfg.Interval = n
+				return config.Save(cfg)
 			},
 		},
 		{
@@ -148,7 +151,7 @@ func main() {
 			Group: "Repos",
 			Hint:  "Add a new repo to watch (owner/repo format)",
 			Get:   func() string { return "" },
-			Set: func(v string) error {
+			Validate: func(v string) error {
 				v = strings.TrimSpace(v)
 				if v == "" || !strings.Contains(v, "/") {
 					return fmt.Errorf("must be owner/repo format")
@@ -158,9 +161,12 @@ func main() {
 						return fmt.Errorf("repo already exists")
 					}
 				}
-				cfg.RepoEntries = append(cfg.RepoEntries, config.RepoEntry{Name: v})
-				config.Save(cfg)
 				return nil
+			},
+			Set: func(v string) error {
+				v = strings.TrimSpace(v)
+				cfg.RepoEntries = append(cfg.RepoEntries, config.RepoEntry{Name: v})
+				return config.Save(cfg)
 			},
 		},
 		{
@@ -168,23 +174,25 @@ func main() {
 			Group: "Repos",
 			Hint:  "Remove a watched repo (owner/repo format)",
 			Get:   func() string { return "" },
+			Validate: func(v string) error {
+				v = strings.TrimSpace(v)
+				for _, r := range cfg.RepoEntries {
+					if r.Name == v {
+						return nil
+					}
+				}
+				return fmt.Errorf("repo not found")
+			},
 			Set: func(v string) error {
 				v = strings.TrimSpace(v)
 				filtered := make([]config.RepoEntry, 0, len(cfg.RepoEntries))
-				found := false
 				for _, r := range cfg.RepoEntries {
-					if r.Name == v {
-						found = true
-						continue
+					if r.Name != v {
+						filtered = append(filtered, r)
 					}
-					filtered = append(filtered, r)
-				}
-				if !found {
-					return fmt.Errorf("repo not found")
 				}
 				cfg.RepoEntries = filtered
-				config.Save(cfg)
-				return nil
+				return config.Save(cfg)
 			},
 		},
 	})
@@ -193,7 +201,7 @@ func main() {
 	// deadlocking — bubbletea's p.msgs is unbuffered, and Signal.Set triggers
 	// bus.schedule → p.Send from the UI goroutine which would block forever.
 	leftSig := blit.NewSignal(
-		" ? help  s sort  t type  c config  D debug  p pause  r refresh  1-5 tab  0 clear")
+		" ? help  s sort  t type  c config  D debug  p pause  r refresh  y copy  1-5 tab  0 clear")
 	rightSig := blit.NewSignal[string]("")
 	updateStatusRight := func() {
 		var parts []string
@@ -326,7 +334,8 @@ func main() {
 		},
 	})
 
-	app := blit.NewApp(
+	var app *blit.App
+	app = blit.NewApp(
 		blit.WithTheme(resolveTheme(cfg.Theme)),
 		blit.WithLayout(&blit.DualPane{
 			Main:         tabs,
@@ -340,41 +349,83 @@ func main() {
 		}),
 		blit.WithStatusBarSignal(leftSig, rightSig),
 		blit.WithHelp(),
-		blit.WithOverlay("Settings", "c", configEditor),
-		blit.WithOverlay("Debug", "D", debugOverlay),
-		blit.WithOverlay("Detail", "", detailOverlay),
-		blit.WithOverlay("Theme", "ctrl+t", themePicker),
-		blit.WithOverlay("Command", ":", cmdBar),
+		blit.WithSlotOverlay("Settings", "c", configEditor),
+		blit.WithSlotOverlay("Debug", "D", debugOverlay),
+		blit.WithSlotOverlay("Detail", "", detailOverlay),
+		blit.WithSlotOverlay("Theme", "ctrl+t", themePicker),
+		blit.WithSlotOverlay("Command", ":", cmdBar),
 		// Global keybindings
 		blit.WithKeyBind(blit.KeyBind{
 			Key: "p", Label: "Pause/resume", Group: "CONTROLS",
-			Handler: func() { stream.TogglePause(); updateStatusRight() },
+			Handler: func() {
+				stream.TogglePause()
+				updateStatusRight()
+				if stream.IsPaused() {
+					app.Send(blit.ToastMsg{Severity: blit.SeverityInfo, Title: "Paused", Duration: 3 * time.Second})
+				} else {
+					app.Send(blit.ToastMsg{Severity: blit.SeverityInfo, Title: "Resumed", Duration: 3 * time.Second})
+				}
+			},
 		}),
 		blit.WithKeyBind(blit.KeyBind{
 			Key: "r", Label: "Refresh now", Group: "CONTROLS",
-			Handler: func() { stream.ForceRefresh() },
+			Handler: func() {
+				stream.ForceRefresh()
+				app.Send(blit.ToastMsg{Severity: blit.SeverityInfo, Title: "Refreshing…", Duration: 3 * time.Second})
+			},
 		}),
 		blit.WithKeyBind(blit.KeyBind{
 			Key: "s", Label: "Toggle sort", Group: "CONTROLS",
-			Handler: func() { stream.ToggleSort(); updateStatusRight() },
+			Handler: func() {
+				stream.ToggleSort()
+				updateStatusRight()
+				if stream.IsNewestFirst() {
+					app.Send(blit.ToastMsg{Severity: blit.SeverityInfo, Title: "Newest first", Duration: 3 * time.Second})
+				} else {
+					app.Send(blit.ToastMsg{Severity: blit.SeverityInfo, Title: "Oldest first", Duration: 3 * time.Second})
+				}
+			},
 		}),
 		blit.WithKeyBind(blit.KeyBind{
 			Key: "t", Label: "Type filter →", Group: "FILTER",
-			Handler: func() { stream.CycleTypeFilter(true); updateStatusRight() },
+			Handler: func() {
+				stream.CycleTypeFilter(true)
+				updateStatusRight()
+				if f := stream.TypeFilter(); f != "" {
+					ev := github.Event{Type: f}
+					app.Send(blit.ToastMsg{Severity: blit.SeverityInfo, Title: "Filter: " + ev.Label(), Duration: 3 * time.Second})
+				} else {
+					app.Send(blit.ToastMsg{Severity: blit.SeverityInfo, Title: "Filter: All", Duration: 3 * time.Second})
+				}
+			},
 		}),
 		blit.WithKeyBind(blit.KeyBind{
 			Key: "T", Label: "Type filter ←", Group: "FILTER",
-			Handler: func() { stream.CycleTypeFilter(false); updateStatusRight() },
+			Handler: func() {
+				stream.CycleTypeFilter(false)
+				updateStatusRight()
+				if f := stream.TypeFilter(); f != "" {
+					ev := github.Event{Type: f}
+					app.Send(blit.ToastMsg{Severity: blit.SeverityInfo, Title: "Filter: " + ev.Label(), Duration: 3 * time.Second})
+				} else {
+					app.Send(blit.ToastMsg{Severity: blit.SeverityInfo, Title: "Filter: All", Duration: 3 * time.Second})
+				}
+			},
 		}),
 		blit.WithKeyBind(blit.KeyBind{
 			Key: "0", Label: "Clear filters", Group: "FILTER",
-			Handler: func() { stream.ClearFilters(); updateStatusRight() },
+			Handler: func() {
+				stream.ClearFilters()
+				updateStatusRight()
+				app.Send(blit.ToastMsg{Severity: blit.SeverityInfo, Title: "Filters cleared", Duration: 3 * time.Second})
+			},
 		}),
 		blit.WithMouseSupport(),
-		blit.WithTickInterval(time.Second),
+		blit.WithTickInterval(200*time.Millisecond),
 		blit.WithAutoUpdate(updatewire.New(version)),
+		blit.WithDevConsole(),
+		blit.WithAnimations(true),
 	)
-
 
 	if err := app.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -407,6 +458,7 @@ Keybindings (in TUI):
   Tab           Switch focus
   Enter         Event detail
   o             Open in browser
+  y             Copy URL to clipboard
 
 Config: ~/.config/gitstream/config.yaml
 `)
@@ -414,12 +466,20 @@ Config: ~/.config/gitstream/config.yaml
 
 func renderEventDetail(de ui.DisplayEvent, w int, theme blit.Theme) string {
 	ev := de.Event
-	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
-	valStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff"))
-	color := ui.EventColor(ev.Type)
+
+	// Breadcrumb trail: gitstream > repo > event type
+	bc := blit.NewBreadcrumbs([]string{"gitstream", ev.Repo.Name, ev.Label()})
+	bc.SetSize(w, 1)
+	bc.SetTheme(theme)
+
+	labelStyle := lipgloss.NewStyle().Foreground(theme.Muted)
+	valStyle := lipgloss.NewStyle().Foreground(theme.Text)
+	color := ui.EventColor(ev.Type, theme)
 	typeStyle := lipgloss.NewStyle().Foreground(color).Bold(true)
 
 	lines := []string{
+		bc.View(),
+		"",
 		labelStyle.Render("Type:    ") + typeStyle.Render(ev.Label()),
 		labelStyle.Render("Repo:    ") + valStyle.Render(ev.Repo.Name),
 		labelStyle.Render("Actor:   ") + valStyle.Render(ev.Actor.Login),
@@ -435,7 +495,6 @@ func renderEventDetail(de ui.DisplayEvent, w int, theme blit.Theme) string {
 	detail := ev.Detail()
 	if detail != "" {
 		lines = append(lines, labelStyle.Render("Detail:"))
-		// Word-wrap detail to width
 		maxW := w - 2
 		if maxW < 20 {
 			maxW = 20
@@ -453,6 +512,7 @@ func renderEventDetail(de ui.DisplayEvent, w int, theme blit.Theme) string {
 	if len(ev.Payload.Commits) > 0 {
 		lines = append(lines, "")
 		lines = append(lines, labelStyle.Render("Commits:"))
+		shaStyle := lipgloss.NewStyle().Foreground(theme.Warn)
 		for _, c := range ev.Payload.Commits {
 			sha := c.SHA
 			if len(sha) > 7 {
@@ -466,7 +526,7 @@ func renderEventDetail(de ui.DisplayEvent, w int, theme blit.Theme) string {
 			if maxMsg > 0 && len(msg) > maxMsg {
 				msg = msg[:maxMsg-1] + "…"
 			}
-			lines = append(lines, "  "+lipgloss.NewStyle().Foreground(lipgloss.Color("#ffaa00")).Render(sha)+" "+valStyle.Render(msg))
+			lines = append(lines, "  "+shaStyle.Render(sha)+" "+valStyle.Render(msg))
 		}
 	}
 
@@ -508,9 +568,11 @@ func renderEventDetail(de ui.DisplayEvent, w int, theme blit.Theme) string {
 	if cd := ev.CompareData; cd != nil {
 		lines = append(lines, "")
 		lines = append(lines, labelStyle.Render(fmt.Sprintf("Files changed: %d, Commits: %d", len(cd.Files), cd.TotalCommits)))
+		addStyle := lipgloss.NewStyle().Foreground(theme.Positive)
+		delStyle := lipgloss.NewStyle().Foreground(theme.Negative)
 		for _, f := range cd.Files {
-			adds := lipgloss.NewStyle().Foreground(lipgloss.Color("#22c55e")).Render(fmt.Sprintf("+%d", f.Additions))
-			dels := lipgloss.NewStyle().Foreground(lipgloss.Color("#ef4444")).Render(fmt.Sprintf("-%d", f.Deletions))
+			adds := addStyle.Render(fmt.Sprintf("+%d", f.Additions))
+			dels := delStyle.Render(fmt.Sprintf("-%d", f.Deletions))
 			lines = append(lines, "  "+adds+" "+dels+" "+valStyle.Render(f.Filename))
 		}
 	}
@@ -519,12 +581,22 @@ func renderEventDetail(de ui.DisplayEvent, w int, theme blit.Theme) string {
 }
 
 func resolveTheme(name string) blit.Theme {
-	if name == "" {
-		return blit.DefaultTheme()
+	if name != "" {
+		presets := blit.Presets()
+		if t, ok := presets[name]; ok {
+			return t
+		}
 	}
-	presets := blit.Presets()
-	if t, ok := presets[name]; ok {
-		return t
+	t := blit.DefaultTheme()
+	t.Extra = map[string]lipgloss.Color{
+		"info":    "#06b6d4",
+		"create":  "#22c55e",
+		"delete":  "#ef4444",
+		"review":  "#a855f7",
+		"comment": "#6b7280",
+		"issue":   "#eab308",
+		"release": "#f97316",
+		"local":   "#a78bfa",
 	}
-	return blit.DefaultTheme()
+	return t
 }

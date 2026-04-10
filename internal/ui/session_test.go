@@ -62,3 +62,10 @@ func TestSession_TypeFilter(t *testing.T) {
 		r.Key("t").Key("t").Key("0")
 	})
 }
+
+// TestSession_SortToggle covers toggling between oldest-first and newest-first.
+func TestSession_SortToggle(t *testing.T) {
+	recordAndVerify(t, "sort_toggle", func(r *btest.SessionRecorder) {
+		r.Key("s").Key("s")
+	})
+}

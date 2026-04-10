@@ -22,16 +22,22 @@ type StatusPanel struct {
 	listView   *blit.ListView[panelLine]
 	focused    bool
 	width      int
+	theme      blit.Theme
+	styles     Styles
 	sections   map[string]*blit.CollapsibleSection
 	headerMap  map[int]string // line index → repo remote
 }
 
 func NewStatusPanel() *StatusPanel {
+	th := blit.DefaultTheme()
 	p := &StatusPanel{
 		sections:  make(map[string]*blit.CollapsibleSection),
 		headerMap: make(map[int]string),
+		theme:     th,
+		styles:    NewStyles(th),
 	}
 	p.listView = blit.NewListView(blit.ListViewOpts[panelLine]{
+		EmptyText: "No local repos found",
 		RenderItem: func(item panelLine, idx int, isCursor bool, theme blit.Theme) string {
 			return item.text
 		},
@@ -89,6 +95,8 @@ func (p *StatusPanel) SetFocused(f bool) {
 
 // SetTheme implements blit.Themed so the App's theme propagates to the ListView.
 func (p *StatusPanel) SetTheme(t blit.Theme) {
+	p.theme = t
+	p.styles = NewStyles(t)
 	p.listView.SetTheme(t)
 }
 
@@ -98,7 +106,7 @@ func (p *StatusPanel) rebuildContent() {
 
 	if len(p.repoStatus) == 0 {
 		lines = append(lines, panelLine{text: ""})
-		lines = append(lines, panelLine{text: PanelDimStyle.Render("Scanning for repos...")})
+		lines = append(lines, panelLine{text: p.styles.PanelDim.Render("Scanning for repos...")})
 		p.listView.SetItems(lines)
 		return
 	}
@@ -126,23 +134,23 @@ func (p *StatusPanel) rebuildContent() {
 			indicator = "▶"
 		}
 		p.headerMap[len(lines)] = s.Remote
-		lines = append(lines, panelLine{text: PanelRepoStyle.Render(indicator + " " + short)})
+		lines = append(lines, panelLine{text: p.styles.PanelRepo.Render(indicator + " " + short)})
 
 		if !sec.Collapsed {
 			if s.Error != nil {
-				lines = append(lines, panelLine{text: PanelDimStyle.Render("  error")})
+				lines = append(lines, panelLine{text: p.styles.PanelDim.Render("  error")})
 			} else {
-				lines = append(lines, panelLine{text: PanelDimStyle.Render(fmt.Sprintf("  ᛘ %s", s.Branch))})
+				lines = append(lines, panelLine{text: p.styles.PanelDim.Render(fmt.Sprintf("  ᛘ %s", s.Branch))})
 
 				if s.Uncommitted == 0 && s.Unpushed == 0 {
-					lines = append(lines, panelLine{text: PanelCleanStyle.Render("  ✓ clean")})
+					lines = append(lines, panelLine{text: p.styles.PanelClean.Render("  ✓ clean")})
 				} else {
 					if s.Uncommitted > 0 {
-						lines = append(lines, panelLine{text: PanelDirtyStyle.Render(
+						lines = append(lines, panelLine{text: p.styles.PanelDirty.Render(
 							fmt.Sprintf("  ● %d uncommitted", s.Uncommitted))})
 					}
 					if s.Unpushed > 0 {
-						lines = append(lines, panelLine{text: PanelWarnStyle.Render(
+						lines = append(lines, panelLine{text: p.styles.PanelWarn.Render(
 							fmt.Sprintf("  ↑ %d unpushed", s.Unpushed))})
 						for _, c := range s.UnpushedCommits {
 							msg := c.Message
@@ -153,29 +161,29 @@ func (p *StatusPanel) rebuildContent() {
 							if len(msg) > maxLen {
 								msg = msg[:maxLen-1] + "…"
 							}
-							lines = append(lines, panelLine{text: PanelDimStyle.Render(
+							lines = append(lines, panelLine{text: p.styles.PanelDim.Render(
 								fmt.Sprintf("    %s %s", c.SHA, msg))})
 						}
 					}
 				}
 				if !s.HasUpstream {
-					lines = append(lines, panelLine{text: PanelDimStyle.Render("  ⚠ no upstream")})
+					lines = append(lines, panelLine{text: p.styles.PanelDim.Render("  ⚠ no upstream")})
 				}
 
 				if s.CI != nil {
 					var ciLine string
 					switch s.CI.Conclusion {
 					case "success":
-						ciLine = PanelCleanStyle.Render("  ✓ CI passed")
+						ciLine = p.styles.PanelClean.Render("  ✓ CI passed")
 					case "failure":
-						ciLine = PanelCIFailStyle.Render("  ✗ CI failed")
+						ciLine = p.styles.PanelCIFail.Render("  ✗ CI failed")
 					case "cancelled":
-						ciLine = PanelDimStyle.Render("  ○ CI cancelled")
+						ciLine = p.styles.PanelDim.Render("  ○ CI cancelled")
 					default:
 						if s.CI.Status == "in_progress" {
-							ciLine = PanelWarnStyle.Render("  ◌ CI running")
+							ciLine = p.styles.PanelWarn.Render("  ◌ CI running")
 						} else {
-							ciLine = PanelDimStyle.Render(fmt.Sprintf("  ○ CI %s", s.CI.Conclusion))
+							ciLine = p.styles.PanelDim.Render(fmt.Sprintf("  ○ CI %s", s.CI.Conclusion))
 						}
 					}
 					lines = append(lines, panelLine{text: ciLine})

@@ -30,30 +30,3 @@ func eventToRow(de DisplayEvent) blit.Row {
 	}
 }
 
-// renderEventLine renders a single event as a styled string (legacy).
-func renderEventLine(ev github.Event, now time.Time) string {
-	t := ev.CreatedAt.Local().Format("15:04:05")
-	rel := blit.RelativeTime(ev.CreatedAt, now)
-	timeStr := fmt.Sprintf("%s %s", t, rel)
-
-	label := ev.Label()
-	detail := ev.Detail()
-	actor := ev.Actor.Login
-	repo := ev.ShortRepo()
-	url := ev.URL()
-
-	detailRendered := DetailStyle.Render(detail)
-	if url != "" {
-		detailRendered = blit.OSC8Link(url, detailRendered)
-	}
-
-	line := fmt.Sprintf("%s  %s %s %s %s",
-		TimeStyle.Render(timeStr),
-		RepoStyle.Render(repo),
-		blit.Badge(label, EventColor(ev.Type), true),
-		ActorStyle.Render(actor),
-		detailRendered,
-	)
-
-	return line
-}

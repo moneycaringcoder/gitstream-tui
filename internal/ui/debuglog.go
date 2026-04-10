@@ -8,28 +8,9 @@ import (
 	blit "github.com/blitui/blit"
 )
 
-const maxLogEntries = 200
-
-// LogLevel indicates severity.
-type LogLevel int
-
-const (
-	LogInfo LogLevel = iota
-	LogWarn
-	LogError
-)
-
-// LogEntry is a single debug log entry.
-type LogEntry struct {
-	Time    time.Time
-	Level   LogLevel
-	Message string
-}
-
-// DebugLog is a thread-safe circular log buffer.
+// DebugLog is a thread-safe log that writes directly to a blit.LogViewer.
 type DebugLog struct {
 	mu        sync.Mutex
-	entries   []LogEntry
 	stats     FetchStats
 	logViewer *blit.LogViewer
 }
@@ -54,55 +35,33 @@ type FetchStats struct {
 }
 
 func NewDebugLog() *DebugLog {
-	return &DebugLog{
-		entries: make([]LogEntry, 0, maxLogEntries),
-	}
+	return &DebugLog{}
 }
 
-// SetLogViewer wires a blit.LogViewer so that new log entries are also appended to it.
+// SetLogViewer wires a blit.LogViewer so that new log entries are appended to it.
 func (d *DebugLog) SetLogViewer(lv *blit.LogViewer) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.logViewer = lv
 }
 
-// mapLevel converts a ui.LogLevel to a blit.LogLevel.
-func mapLevel(l LogLevel) blit.LogLevel {
-	switch l {
-	case LogWarn:
-		return blit.LogWarn
-	case LogError:
-		return blit.LogError
-	default:
-		return blit.LogInfo
-	}
-}
-
-func (d *DebugLog) Log(level LogLevel, format string, args ...interface{}) {
+func (d *DebugLog) Log(level blit.LogLevel, format string, args ...interface{}) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	now := time.Now()
 	msg := fmt.Sprintf(format, args...)
-	d.entries = append(d.entries, LogEntry{
-		Time:    now,
-		Level:   level,
-		Message: msg,
-	})
-	if len(d.entries) > maxLogEntries {
-		d.entries = d.entries[len(d.entries)-maxLogEntries:]
-	}
 	if d.logViewer != nil {
 		d.logViewer.Append(blit.LogLine{
-			Level:     mapLevel(level),
+			Level:     level,
 			Timestamp: now,
 			Message:   msg,
 		})
 	}
 }
 
-func (d *DebugLog) Info(format string, args ...interface{})  { d.Log(LogInfo, format, args...) }
-func (d *DebugLog) Warn(format string, args ...interface{})  { d.Log(LogWarn, format, args...) }
-func (d *DebugLog) Error(format string, args ...interface{}) { d.Log(LogError, format, args...) }
+func (d *DebugLog) Info(format string, args ...interface{})  { d.Log(blit.LogInfo, format, args...) }
+func (d *DebugLog) Warn(format string, args ...interface{})  { d.Log(blit.LogWarn, format, args...) }
+func (d *DebugLog) Error(format string, args ...interface{}) { d.Log(blit.LogError, format, args...) }
 
 func (d *DebugLog) RecordFetch(repo string, success bool, eventCount int, usingCache bool) {
 	d.mu.Lock()
@@ -143,12 +102,3 @@ func (d *DebugLog) GetStats() FetchStats {
 	defer d.mu.Unlock()
 	return d.stats
 }
-
-func (d *DebugLog) GetEntries() []LogEntry {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	cp := make([]LogEntry, len(d.entries))
-	copy(cp, d.entries)
-	return cp
-}
-
