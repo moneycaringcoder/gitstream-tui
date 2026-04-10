@@ -45,9 +45,6 @@ var (
 			Foreground(ColorDim).
 			PaddingLeft(1)
 
-	HelpStyle = lipgloss.NewStyle().
-			Foreground(ColorDim)
-
 	// Status panel styles
 	PanelBorderStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
