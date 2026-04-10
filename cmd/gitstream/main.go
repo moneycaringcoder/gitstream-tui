@@ -189,13 +189,11 @@ func main() {
 		},
 	})
 
-	// Signal-driven status bar
-	leftSig := blit.NewSignal(fmt.Sprintf(
-		" ? help  s sort  t type  c config  D debug  p pause  r refresh  1-%d repo  0 clear",
-		len(cfg.Repos())))
-
-	rightSig := blit.NewSignal[string]("")
-	updateStatusRight := func() {
+	// Closure-driven status bar (closures run during View — no signal deadlock)
+	statusLeft := func() string {
+		return " ? help  s sort  t type  c config  D debug  p pause  r refresh  1-5 tab  0 clear"
+	}
+	statusRight := func() string {
 		var parts []string
 		sortLabel := "oldest"
 		if stream.IsNewestFirst() {
@@ -209,9 +207,8 @@ func main() {
 			ev := github.Event{Type: stream.TypeFilter()}
 			parts = append(parts, "type:"+ev.Label())
 		}
-		rightSig.Set(strings.Join(parts, "  ") + " ")
+		return strings.Join(parts, "  ") + " "
 	}
-	updateStatusRight()
 
 	// Vim-style command bar
 	cmdBar := blit.NewCommandBar([]blit.Command{
@@ -248,10 +245,8 @@ func main() {
 				args = strings.TrimSpace(args)
 				if args == "newest" && !stream.IsNewestFirst() {
 					stream.ToggleSort()
-					updateStatusRight()
 				} else if args == "oldest" && stream.IsNewestFirst() {
 					stream.ToggleSort()
-					updateStatusRight()
 				}
 				return nil
 			},
@@ -262,10 +257,8 @@ func main() {
 				args = strings.TrimSpace(args)
 				if strings.HasPrefix(args, "repo:") {
 					stream.SetRepoFilter(strings.TrimPrefix(args, "repo:"))
-					updateStatusRight()
 				} else if strings.HasPrefix(args, "type:") {
 					stream.SetTypeFilter(strings.TrimPrefix(args, "type:"))
-					updateStatusRight()
 				}
 				return nil
 			},
@@ -274,7 +267,6 @@ func main() {
 			Name: "clear", Hint: "Clear all filters",
 			Run: func(_ string) tea.Cmd {
 				stream.ClearFilters()
-				updateStatusRight()
 				return nil
 			},
 		},
@@ -308,7 +300,6 @@ func main() {
 			filters := []string{"", "PushEvent", "PullRequestEvent", "IssuesEvent", "LocalPushEvent"}
 			if idx < len(filters) {
 				stream.SetTypeFilter(filters[idx])
-				updateStatusRight()
 			}
 		},
 	})
@@ -325,7 +316,7 @@ func main() {
 			SideRight:    true,
 			ToggleKey:    "",
 		}),
-		blit.WithStatusBarSignal(leftSig, rightSig),
+		blit.WithStatusBar(statusLeft, statusRight),
 		blit.WithHelp(),
 		blit.WithOverlay("Settings", "c", configEditor),
 		blit.WithOverlay("Debug", "D", debugOverlay),
@@ -335,7 +326,7 @@ func main() {
 		// Global keybindings
 		blit.WithKeyBind(blit.KeyBind{
 			Key: "p", Label: "Pause/resume", Group: "CONTROLS",
-			Handler: func() { stream.TogglePause(); updateStatusRight() },
+			Handler: func() { stream.TogglePause() },
 		}),
 		blit.WithKeyBind(blit.KeyBind{
 			Key: "r", Label: "Refresh now", Group: "CONTROLS",
@@ -343,43 +334,25 @@ func main() {
 		}),
 		blit.WithKeyBind(blit.KeyBind{
 			Key: "s", Label: "Toggle sort", Group: "CONTROLS",
-			Handler: func() { stream.ToggleSort(); updateStatusRight() },
+			Handler: func() { stream.ToggleSort() },
 		}),
 		blit.WithKeyBind(blit.KeyBind{
 			Key: "t", Label: "Type filter →", Group: "FILTER",
-			Handler: func() { stream.CycleTypeFilter(true); updateStatusRight() },
+			Handler: func() { stream.CycleTypeFilter(true) },
 		}),
 		blit.WithKeyBind(blit.KeyBind{
 			Key: "T", Label: "Type filter ←", Group: "FILTER",
-			Handler: func() { stream.CycleTypeFilter(false); updateStatusRight() },
+			Handler: func() { stream.CycleTypeFilter(false) },
 		}),
 		blit.WithKeyBind(blit.KeyBind{
 			Key: "0", Label: "Clear filters", Group: "FILTER",
-			Handler: func() { stream.ClearFilters(); updateStatusRight() },
+			Handler: func() { stream.ClearFilters() },
 		}),
 		blit.WithMouseSupport(),
 		blit.WithTickInterval(time.Second),
 		blit.WithAutoUpdate(updatewire.New(version)),
 	)
 
-	// Register repo number filters (1-9)
-	for i := 1; i <= 9; i++ {
-		idx := i - 1
-		app.AddKeyBind(blit.KeyBind{
-			Key: fmt.Sprintf("%d", i), Label: fmt.Sprintf("Filter repo %d", i), Group: "FILTER",
-			Handler: func() {
-				repos := cfg.Repos()
-				if idx < len(repos) {
-					repo := repos[idx]
-					short := repo
-					if j := strings.LastIndex(repo, "/"); j >= 0 {
-						short = repo[j+1:]
-					}
-					stream.SetRepoFilter(short)
-				}
-			},
-		})
-	}
 
 	if err := app.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
