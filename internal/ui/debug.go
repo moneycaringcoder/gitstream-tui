@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	blit "github.com/blitui/blit"
+	"github.com/blitui/blit/charts"
 )
 
 // DebugOverlay shows API stats and recent log entries using blit.LogViewer.
@@ -85,9 +86,56 @@ func (d *DebugOverlay) View() string {
 		}
 	}
 
-	// Rate limit
+	// Rate limit gauge
 	if stats.RateLimit > 0 {
-		b.WriteString(dim.Render(fmt.Sprintf("  Rate limit:   %d/%d", stats.RateRemain, stats.RateLimit)) + "\n")
+		b.WriteString("\n")
+		b.WriteString(statsHeader.Render("  Rate Limit") + "\n")
+		gauge := charts.NewGauge(
+			float64(stats.RateRemain),
+			float64(stats.RateLimit),
+			[]float64{float64(stats.RateLimit) * 0.2, float64(stats.RateLimit) * 0.5},
+			fmt.Sprintf("%d/%d", stats.RateRemain, stats.RateLimit),
+		)
+		gauge.SetTheme(th)
+		gaugeWidth := d.width - 4
+		if gaugeWidth < 20 {
+			gaugeWidth = 20
+		}
+		gauge.SetSize(gaugeWidth, 1)
+		b.WriteString("  " + gauge.View() + "\n")
+	}
+
+	// Per-repo event bar chart
+	if len(stats.RepoHealth) > 0 {
+		b.WriteString("\n")
+		b.WriteString(statsHeader.Render("  Events by Repo") + "\n")
+		var data []float64
+		var labels []string
+		for repo, h := range stats.RepoHealth {
+			short := repo
+			if i := len(repo) - 1; i >= 0 {
+				for j := i; j >= 0; j-- {
+					if repo[j] == '/' {
+						short = repo[j+1:]
+						break
+					}
+				}
+			}
+			streak := float64(h.FailStreak)
+			if h.LastSuccess {
+				streak = 1
+			}
+			data = append(data, streak)
+			labels = append(labels, short)
+		}
+		bar := charts.NewBar(data, labels, true)
+		bar.SetTheme(th)
+		barWidth := d.width - 4
+		if barWidth < 20 {
+			barWidth = 20
+		}
+		bar.SetSize(barWidth, len(labels)+1)
+		b.WriteString("  " + bar.View() + "\n")
 	}
 
 	b.WriteString("\n")
@@ -103,8 +151,8 @@ func (d *DebugOverlay) KeyBindings() []blit.KeyBind {
 func (d *DebugOverlay) SetSize(w, h int) {
 	d.width = w
 	d.height = h
-	// Reserve lines for the stats header; give the rest to the log viewer
-	headerLines := 12
+	// Reserve lines for stats, gauge, bar chart; give the rest to the log viewer
+	headerLines := 20
 	lvHeight := h - headerLines
 	if lvHeight < 4 {
 		lvHeight = 4
