@@ -189,11 +189,13 @@ func main() {
 		},
 	})
 
-	// Closure-driven status bar (closures run during View — no signal deadlock)
-	statusLeft := func() string {
-		return " ? help  s sort  t type  c config  D debug  p pause  r refresh  1-5 tab  0 clear"
-	}
-	statusRight := func() string {
+	// Signal-driven status bar. Set() is called via goroutine to avoid
+	// deadlocking — bubbletea's p.msgs is unbuffered, and Signal.Set triggers
+	// bus.schedule → p.Send from the UI goroutine which would block forever.
+	leftSig := blit.NewSignal(
+		" ? help  s sort  t type  c config  D debug  p pause  r refresh  1-5 tab  0 clear")
+	rightSig := blit.NewSignal[string]("")
+	updateStatusRight := func() {
 		var parts []string
 		sortLabel := "oldest"
 		if stream.IsNewestFirst() {
@@ -207,8 +209,10 @@ func main() {
 			ev := github.Event{Type: stream.TypeFilter()}
 			parts = append(parts, "type:"+ev.Label())
 		}
-		return strings.Join(parts, "  ") + " "
+		v := strings.Join(parts, "  ") + " "
+		go rightSig.Set(v)
 	}
+	updateStatusRight()
 
 	// Vim-style command bar
 	cmdBar := blit.NewCommandBar([]blit.Command{
@@ -245,8 +249,10 @@ func main() {
 				args = strings.TrimSpace(args)
 				if args == "newest" && !stream.IsNewestFirst() {
 					stream.ToggleSort()
+					updateStatusRight()
 				} else if args == "oldest" && stream.IsNewestFirst() {
 					stream.ToggleSort()
+					updateStatusRight()
 				}
 				return nil
 			},
@@ -257,8 +263,10 @@ func main() {
 				args = strings.TrimSpace(args)
 				if strings.HasPrefix(args, "repo:") {
 					stream.SetRepoFilter(strings.TrimPrefix(args, "repo:"))
+					updateStatusRight()
 				} else if strings.HasPrefix(args, "type:") {
 					stream.SetTypeFilter(strings.TrimPrefix(args, "type:"))
+					updateStatusRight()
 				}
 				return nil
 			},
@@ -267,6 +275,7 @@ func main() {
 			Name: "clear", Hint: "Clear all filters",
 			Run: func(_ string) tea.Cmd {
 				stream.ClearFilters()
+				updateStatusRight()
 				return nil
 			},
 		},
@@ -300,6 +309,7 @@ func main() {
 			filters := []string{"", "PushEvent", "PullRequestEvent", "IssuesEvent", "LocalPushEvent"}
 			if idx < len(filters) {
 				stream.SetTypeFilter(filters[idx])
+				updateStatusRight()
 			}
 		},
 	})
@@ -316,7 +326,7 @@ func main() {
 			SideRight:    true,
 			ToggleKey:    "",
 		}),
-		blit.WithStatusBar(statusLeft, statusRight),
+		blit.WithStatusBarSignal(leftSig, rightSig),
 		blit.WithHelp(),
 		blit.WithOverlay("Settings", "c", configEditor),
 		blit.WithOverlay("Debug", "D", debugOverlay),
@@ -326,7 +336,7 @@ func main() {
 		// Global keybindings
 		blit.WithKeyBind(blit.KeyBind{
 			Key: "p", Label: "Pause/resume", Group: "CONTROLS",
-			Handler: func() { stream.TogglePause() },
+			Handler: func() { stream.TogglePause(); updateStatusRight() },
 		}),
 		blit.WithKeyBind(blit.KeyBind{
 			Key: "r", Label: "Refresh now", Group: "CONTROLS",
@@ -334,19 +344,19 @@ func main() {
 		}),
 		blit.WithKeyBind(blit.KeyBind{
 			Key: "s", Label: "Toggle sort", Group: "CONTROLS",
-			Handler: func() { stream.ToggleSort() },
+			Handler: func() { stream.ToggleSort(); updateStatusRight() },
 		}),
 		blit.WithKeyBind(blit.KeyBind{
 			Key: "t", Label: "Type filter →", Group: "FILTER",
-			Handler: func() { stream.CycleTypeFilter(true) },
+			Handler: func() { stream.CycleTypeFilter(true); updateStatusRight() },
 		}),
 		blit.WithKeyBind(blit.KeyBind{
 			Key: "T", Label: "Type filter ←", Group: "FILTER",
-			Handler: func() { stream.CycleTypeFilter(false) },
+			Handler: func() { stream.CycleTypeFilter(false); updateStatusRight() },
 		}),
 		blit.WithKeyBind(blit.KeyBind{
 			Key: "0", Label: "Clear filters", Group: "FILTER",
-			Handler: func() { stream.ClearFilters() },
+			Handler: func() { stream.ClearFilters(); updateStatusRight() },
 		}),
 		blit.WithMouseSupport(),
 		blit.WithTickInterval(time.Second),
