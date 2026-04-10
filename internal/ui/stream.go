@@ -28,18 +28,19 @@ var typeFilters = []string{
 	"ReleaseEvent",
 }
 
-// EventStream displays a scrollable list of GitHub events.
+// EventStream displays a scrollable table of GitHub events.
 // Implements blit.Component.
 type EventStream struct {
 	cfg      *config.Config
 	debugLog *DebugLog
 
-	allEvents     []DisplayEvent
-	seen          map[string]bool
-	seenLocalSHAs map[string]bool
+	allEvents      []DisplayEvent
+	filteredEvents []DisplayEvent // parallel slice for row-click lookup
+	seen           map[string]bool
+	seenLocalSHAs  map[string]bool
 
-	listView *blit.ListView[DisplayEvent]
-	poller   *blit.Poller
+	table  *blit.Table
+	poller *blit.Poller
 
 	filter     string // repo name filter
 	typeFilter string // event type filter
@@ -56,26 +57,58 @@ type EventStream struct {
 
 func NewEventStream(cfg *config.Config, debugLog *DebugLog) *EventStream {
 	s := &EventStream{
-		cfg:           cfg,
-		debugLog:      debugLog,
-		seen:          make(map[string]bool),
-		seenLocalSHAs: make(map[string]bool),
-		allEvents:     make([]DisplayEvent, 0, 256),
-		knownRepos:    append([]string{}, cfg.Repos()...),
+		cfg:            cfg,
+		debugLog:       debugLog,
+		seen:           make(map[string]bool),
+		seenLocalSHAs:  make(map[string]bool),
+		allEvents:      make([]DisplayEvent, 0, 256),
+		filteredEvents: make([]DisplayEvent, 0, 256),
+		knownRepos:     append([]string{}, cfg.Repos()...),
 	}
 
-	s.listView = blit.NewListView(blit.ListViewOpts[DisplayEvent]{
-		RenderItem: func(item DisplayEvent, idx int, isCursor bool, theme blit.Theme) string {
-			return renderEventLine(item.Event, time.Now())
+	columns := []blit.Column{
+		{Title: "Time", Width: 2, MaxWidth: 20},
+		{Title: "Repo", Width: 2, MaxWidth: 18},
+		{Title: "Type", Width: 1, MaxWidth: 10},
+		{Title: "Actor", Width: 2, MaxWidth: 22},
+		{Title: "Detail", Width: 5},
+	}
+
+	s.table = blit.NewTable(columns, nil, blit.TableOpts{
+		Filterable: true,
+		CellRenderer: func(row blit.Row, colIdx int, isCursor bool, theme blit.Theme) string {
+			if colIdx >= len(row) {
+				return ""
+			}
+			switch colIdx {
+			case 0: // Time - dim gray
+				return lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Render(row[colIdx])
+			case 2: // Type - colored badge
+				return blit.Badge(row[colIdx], LabelColor(row[colIdx]), true)
+			default:
+				return row[colIdx]
+			}
 		},
-		HeaderFunc: func(theme blit.Theme) string {
-			return s.renderHeader()
+		RowStyler: func(row blit.Row, idx int, isCursor bool, theme blit.Theme) *lipgloss.Style {
+			if idx < len(s.filteredEvents) {
+				de := s.filteredEvents[idx]
+				if !de.AddedAt.IsZero() && time.Now().Before(de.AddedAt.Add(flashDuration)) {
+					st := lipgloss.NewStyle().Background(lipgloss.Color("#1a2a1a"))
+					return &st
+				}
+			}
+			return nil
 		},
-		DetailFunc: func(item DisplayEvent, theme blit.Theme) string {
-			return s.renderDetailBar(item, theme)
+		OnRowClick: func(row blit.Row, rowIdx int) {
+			if rowIdx < len(s.filteredEvents) && s.DetailOverlay != nil {
+				s.DetailOverlay.Show(s.filteredEvents[rowIdx])
+			}
 		},
-		FlashFunc: func(item DisplayEvent, now time.Time) bool {
-			return !item.AddedAt.IsZero() && now.Before(item.AddedAt.Add(flashDuration))
+		DetailFunc: func(row blit.Row, rowIdx int, width int, theme blit.Theme) string {
+			if rowIdx < len(s.filteredEvents) {
+				return s.renderDetailBar(s.filteredEvents[rowIdx], theme)
+			}
+			return ""
 		},
 		DetailHeight: 3,
 	})
@@ -106,25 +139,28 @@ func (s *EventStream) Update(msg tea.Msg, ctx blit.Context) (blit.Component, tea
 	case tea.KeyMsg:
 		// Enter opens detail overlay instead of browser
 		if msg.String() == "enter" && s.DetailOverlay != nil {
-			if item := s.listView.CursorItem(); item != nil {
-				s.DetailOverlay.Show(*item)
+			idx := s.table.CursorIndex()
+			if idx >= 0 && idx < len(s.filteredEvents) {
+				s.DetailOverlay.Show(s.filteredEvents[idx])
 				return s, blit.Consumed()
 			}
 		}
 		// 'o' opens in browser
 		if msg.String() == "o" {
-			if item := s.listView.CursorItem(); item != nil {
-				if url := item.Event.URL(); url != "" {
+			idx := s.table.CursorIndex()
+			if idx >= 0 && idx < len(s.filteredEvents) {
+				if url := s.filteredEvents[idx].Event.URL(); url != "" {
 					blit.OpenURL(url)
 				}
 				return s, blit.Consumed()
 			}
 		}
-		cmd := s.listView.HandleKey(msg)
+		// Let table handle its own keys (cursor, search, etc.)
+		comp, cmd := s.table.Update(msg, ctx)
+		_ = comp
 		return s, cmd
 
 	case blit.TickMsg:
-		s.listView.Refresh()
 		s.poller.SetInterval(time.Duration(s.cfg.Interval) * time.Second)
 
 		// Check if repos changed (config editor modified them)
@@ -184,9 +220,9 @@ func (s *EventStream) handleEvents(msg eventsMsg) (blit.Component, tea.Cmd) {
 		s.rebuildFiltered()
 		if atEdge {
 			if s.newestFirst {
-				s.listView.ScrollToTop()
+				s.table.SetCursor(0)
 			} else {
-				s.listView.ScrollToBottom()
+				s.table.SetCursor(len(s.filteredEvents) - 1)
 			}
 		}
 	}
@@ -234,9 +270,9 @@ func (s *EventStream) handleGitStatus(msg gitStatusMsg) (blit.Component, tea.Cmd
 		s.rebuildFiltered()
 		if atEdge {
 			if s.newestFirst {
-				s.listView.ScrollToTop()
+				s.table.SetCursor(0)
 			} else {
-				s.listView.ScrollToBottom()
+				s.table.SetCursor(len(s.filteredEvents) - 1)
 			}
 		}
 	}
@@ -244,7 +280,8 @@ func (s *EventStream) handleGitStatus(msg gitStatusMsg) (blit.Component, tea.Cmd
 }
 
 func (s *EventStream) View() string {
-	return s.listView.View()
+	header := s.renderHeader()
+	return header + "\n\n" + s.table.View()
 }
 
 func (s *EventStream) renderHeader() string {
@@ -290,7 +327,7 @@ func (s *EventStream) renderHeader() string {
 	}
 	status := SubtitleStyle.Render(strings.Join(statusParts, "  "))
 
-	return lipgloss.JoinVertical(lipgloss.Left, title, repoList, status, "")
+	return lipgloss.JoinVertical(lipgloss.Left, title, repoList, status)
 }
 
 func (s *EventStream) renderDetailBar(de DisplayEvent, theme blit.Theme) string {
@@ -321,7 +358,7 @@ func (s *EventStream) renderDetailBar(de DisplayEvent, theme blit.Theme) string 
 }
 
 func (s *EventStream) KeyBindings() []blit.KeyBind {
-	bindings := s.listView.KeyBindings()
+	bindings := s.table.KeyBindings()
 	bindings = append(bindings,
 		blit.KeyBind{Key: "enter", Label: "Event detail", Group: "NAVIGATION"},
 		blit.KeyBind{Key: "o", Label: "Open in browser", Group: "NAVIGATION"},
@@ -331,13 +368,14 @@ func (s *EventStream) KeyBindings() []blit.KeyBind {
 
 func (s *EventStream) SetSize(w, h int) {
 	s.width = w
-	s.listView.SetSize(w, h)
+	headerHeight := 4
+	s.table.SetSize(w, h-headerHeight)
 }
 
 func (s *EventStream) Focused() bool       { return s.focused }
 func (s *EventStream) SetFocused(f bool) {
 	s.focused = f
-	s.listView.SetFocused(f)
+	s.table.SetFocused(f)
 }
 
 // Public methods for app-level keybinding handlers.
@@ -377,9 +415,9 @@ func (s *EventStream) ToggleSort() {
 	s.newestFirst = !s.newestFirst
 	s.rebuildFiltered()
 	if s.newestFirst {
-		s.listView.ScrollToTop()
+		s.table.SetCursor(0)
 	} else {
-		s.listView.ScrollToBottom()
+		s.table.SetCursor(len(s.filteredEvents) - 1)
 	}
 }
 
@@ -405,28 +443,34 @@ func (s *EventStream) skipEvent(de DisplayEvent) bool {
 }
 
 func (s *EventStream) rebuildFiltered() {
-	var filtered []DisplayEvent
+	s.filteredEvents = s.filteredEvents[:0]
 	if s.newestFirst {
 		for i := len(s.allEvents) - 1; i >= 0; i-- {
 			if !s.skipEvent(s.allEvents[i]) {
-				filtered = append(filtered, s.allEvents[i])
+				s.filteredEvents = append(s.filteredEvents, s.allEvents[i])
 			}
 		}
 	} else {
 		for _, de := range s.allEvents {
 			if !s.skipEvent(de) {
-				filtered = append(filtered, de)
+				s.filteredEvents = append(s.filteredEvents, de)
 			}
 		}
 	}
-	s.listView.SetItems(filtered)
+	rows := make([]blit.Row, len(s.filteredEvents))
+	for i, de := range s.filteredEvents {
+		rows[i] = eventToRow(de)
+	}
+	s.table.SetRows(rows)
 }
 
 func (s *EventStream) isAtNewEdge() bool {
+	total := len(s.filteredEvents)
+	idx := s.table.CursorIndex()
 	if s.newestFirst {
-		return s.listView.IsAtTop()
+		return idx == 0
 	}
-	return s.listView.IsAtBottom()
+	return idx >= total-1
 }
 
 func slicesEqual(a, b []string) bool {

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/moneycaringcoder/gitstream-tui/internal/github"
 	blit "github.com/blitui/blit"
+	"github.com/moneycaringcoder/gitstream-tui/internal/github"
 )
 
 const flashDuration = 3 * time.Second
@@ -16,6 +16,21 @@ type DisplayEvent struct {
 	AddedAt time.Time
 }
 
+// eventToRow converts a DisplayEvent into a blit.Row for the table.
+func eventToRow(de DisplayEvent) blit.Row {
+	ev := de.Event
+	t := ev.CreatedAt.Local().Format("15:04:05")
+	rel := blit.RelativeTime(ev.CreatedAt, time.Now())
+	return blit.Row{
+		fmt.Sprintf("%s %s", t, rel),
+		ev.ShortRepo(),
+		ev.Label(),
+		ev.Actor.Login,
+		ev.Detail(),
+	}
+}
+
+// renderEventLine renders a single event as a styled string (legacy).
 func renderEventLine(ev github.Event, now time.Time) string {
 	t := ev.CreatedAt.Local().Format("15:04:05")
 	rel := blit.RelativeTime(ev.CreatedAt, now)

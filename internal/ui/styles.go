@@ -131,3 +131,31 @@ func LabelStyle(eventType string) lipgloss.Style {
 func DetailLabelStyle(color lipgloss.Color) lipgloss.Style {
 	return lipgloss.NewStyle().Bold(true).Foreground(color)
 }
+
+// LabelColor maps a display label (e.g. "PUSH", "PR") back to its color.
+func LabelColor(label string) lipgloss.Color {
+	switch label {
+	case "LOCAL":
+		return ColorLocal
+	case "PUSH":
+		return ColorPush
+	case "PR":
+		return ColorPR
+	case "REVIEW":
+		return ColorReview
+	case "COMMENT":
+		return ColorComment
+	case "ISSUE":
+		return ColorIssue
+	case "CREATE":
+		return ColorCreate
+	case "DELETE":
+		return ColorDelete
+	case "RELEASE":
+		return ColorRelease
+	case "STAR", "FORK":
+		return ColorComment
+	default:
+		return ColorDim
+	}
+}
