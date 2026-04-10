@@ -355,17 +355,17 @@ func (s *EventStream) renderHeader() string {
 		if i := strings.LastIndex(repo, "/"); i >= 0 {
 			short = repo[i+1:]
 		}
-		dot := lipgloss.NewStyle().Foreground(s.theme.Muted).Render("○")
 		if h, ok := stats.RepoHealth[repo]; ok {
 			if h.LastSuccess {
-				dot = lipgloss.NewStyle().Foreground(s.theme.Positive).Render("●")
+				statusParts = append(statusParts, blit.Badge("●", s.theme.Positive, false)+" "+short)
 			} else if h.UsingCache && h.FailStreak < 10 {
-				dot = lipgloss.NewStyle().Foreground(s.theme.Warn).Render("●")
+				statusParts = append(statusParts, blit.Badge("●", s.theme.Warn, false)+" "+short)
 			} else {
-				dot = lipgloss.NewStyle().Foreground(s.theme.Negative).Render("●")
+				statusParts = append(statusParts, blit.Badge("●", s.theme.Negative, false)+" "+short)
 			}
+		} else {
+			statusParts = append(statusParts, blit.Badge("○", s.theme.Muted, false)+" "+short)
 		}
-		statusParts = append(statusParts, dot+" "+short)
 	}
 	if stats.RateLimit > 0 {
 		ratePct := float64(stats.RateRemain) / float64(stats.RateLimit) * 100

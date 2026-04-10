@@ -47,7 +47,7 @@ func (d *DebugOverlay) View() string {
 	th := d.theme
 
 	title := lipgloss.NewStyle().Bold(true).Foreground(th.Text).
-		PaddingLeft(1).Render("─── DEBUG LOG ───")
+		PaddingLeft(1).Render(blit.Divider(d.width, th))
 	b.WriteString(title + "\n\n")
 
 	stats := d.debugLog.GetStats()
@@ -70,18 +70,18 @@ func (d *DebugOverlay) View() string {
 		b.WriteString(dim.Render(fmt.Sprintf("  Last fetch:   %s ago", ago)) + "\n")
 	}
 
-	// Repo health dots
+	// Repo health
 	if len(stats.RepoHealth) > 0 {
 		b.WriteString("\n")
 		b.WriteString(statsHeader.Render("  Repo Health") + "\n")
-		green := lipgloss.NewStyle().Foreground(th.Positive)
-		red := lipgloss.NewStyle().Foreground(th.Negative)
 		for repo, h := range stats.RepoHealth {
-			dot := green.Render("●")
-			if !h.LastSuccess {
-				dot = red.Render("●")
+			var badge string
+			if h.LastSuccess {
+				badge = blit.Badge("OK", th.Positive, true)
+			} else {
+				badge = blit.Badge("FAIL", th.Negative, true)
 			}
-			b.WriteString(fmt.Sprintf("  %s %s", dot, dim.Render(repo)) + "\n")
+			b.WriteString(fmt.Sprintf("  %s %s", badge, dim.Render(repo)) + "\n")
 		}
 	}
 

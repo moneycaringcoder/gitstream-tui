@@ -103,6 +103,9 @@ func Save(cfg *Config) error {
 }
 
 func AddRepo(repo string) error {
+	if _, err := blit.EnsureConfigDir("gitstream"); err != nil {
+		return fmt.Errorf("create config dir: %w", err)
+	}
 	cfg, err := Load()
 	if err != nil {
 		cfg = &Config{Interval: 30}
