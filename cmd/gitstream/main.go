@@ -189,13 +189,13 @@ func main() {
 		},
 	})
 
-	// Status bar: left = help hints, right = active filters
-	statusLeft := func() string {
-		return fmt.Sprintf(" ? help  s sort  t type  c config  D debug  p pause  r refresh  1-%d repo  0 clear",
-			len(cfg.Repos()))
-	}
+	// Signal-driven status bar
+	leftSig := blit.NewSignal(fmt.Sprintf(
+		" ? help  s sort  t type  c config  D debug  p pause  r refresh  1-%d repo  0 clear",
+		len(cfg.Repos())))
 
-	statusRight := func() string {
+	rightSig := blit.NewSignal[string]("")
+	updateStatusRight := func() {
 		var parts []string
 		sortLabel := "oldest"
 		if stream.IsNewestFirst() {
@@ -209,8 +209,9 @@ func main() {
 			ev := github.Event{Type: stream.TypeFilter()}
 			parts = append(parts, "type:"+ev.Label())
 		}
-		return strings.Join(parts, "  ") + " "
+		rightSig.Set(strings.Join(parts, "  ") + " ")
 	}
+	updateStatusRight()
 
 	app := blit.NewApp(
 		blit.WithTheme(resolveTheme(cfg.Theme)),
@@ -224,7 +225,7 @@ func main() {
 			SideRight:    true,
 			ToggleKey:    "",
 		}),
-		blit.WithStatusBar(statusLeft, statusRight),
+		blit.WithStatusBarSignal(leftSig, rightSig),
 		blit.WithHelp(),
 		blit.WithOverlay("Settings", "c", configEditor),
 		blit.WithOverlay("Debug", "D", debugOverlay),
@@ -233,7 +234,7 @@ func main() {
 		// Global keybindings
 		blit.WithKeyBind(blit.KeyBind{
 			Key: "p", Label: "Pause/resume", Group: "CONTROLS",
-			Handler: func() { stream.TogglePause() },
+			Handler: func() { stream.TogglePause(); updateStatusRight() },
 		}),
 		blit.WithKeyBind(blit.KeyBind{
 			Key: "r", Label: "Refresh now", Group: "CONTROLS",
@@ -241,19 +242,19 @@ func main() {
 		}),
 		blit.WithKeyBind(blit.KeyBind{
 			Key: "s", Label: "Toggle sort", Group: "CONTROLS",
-			Handler: func() { stream.ToggleSort() },
+			Handler: func() { stream.ToggleSort(); updateStatusRight() },
 		}),
 		blit.WithKeyBind(blit.KeyBind{
 			Key: "t", Label: "Type filter →", Group: "FILTER",
-			Handler: func() { stream.CycleTypeFilter(true) },
+			Handler: func() { stream.CycleTypeFilter(true); updateStatusRight() },
 		}),
 		blit.WithKeyBind(blit.KeyBind{
 			Key: "T", Label: "Type filter ←", Group: "FILTER",
-			Handler: func() { stream.CycleTypeFilter(false) },
+			Handler: func() { stream.CycleTypeFilter(false); updateStatusRight() },
 		}),
 		blit.WithKeyBind(blit.KeyBind{
 			Key: "0", Label: "Clear filters", Group: "FILTER",
-			Handler: func() { stream.ClearFilters() },
+			Handler: func() { stream.ClearFilters(); updateStatusRight() },
 		}),
 		blit.WithMouseSupport(),
 		blit.WithTickInterval(time.Second),
