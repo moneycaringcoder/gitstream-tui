@@ -274,8 +274,13 @@ func (s *EventStream) handleEvents(msg eventsMsg) (blit.Component, tea.Cmd) {
 	if stats.RateLimit > 0 {
 		ratePct := float64(stats.RateRemain) / float64(stats.RateLimit) * 100
 		if ratePct < 20 {
-			cmds = append(cmds, blit.ToastWarn("Rate limit low",
-				fmt.Sprintf("API rate limit at %.0f%%", ratePct)))
+			cmds = append(cmds, blit.ToastCmd(
+				blit.SeverityWarn,
+				"Rate limit low",
+				fmt.Sprintf("API rate limit at %.0f%% (%d/%d)", ratePct, stats.RateRemain, stats.RateLimit),
+				0,
+				blit.ToastAction{Label: "Pause", Handler: func() { s.poller.TogglePause() }},
+			))
 		}
 	}
 

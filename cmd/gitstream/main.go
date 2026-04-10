@@ -381,8 +381,9 @@ func main() {
 		blit.WithMouseSupport(),
 		blit.WithTickInterval(time.Second),
 		blit.WithAutoUpdate(updatewire.New(version)),
+		blit.WithDevConsole(),
+		blit.WithAnimations(true),
 	)
-
 
 	if err := app.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -423,12 +424,20 @@ Config: ~/.config/gitstream/config.yaml
 
 func renderEventDetail(de ui.DisplayEvent, w int, theme blit.Theme) string {
 	ev := de.Event
+
+	// Breadcrumb trail: gitstream > repo > event type
+	bc := blit.NewBreadcrumbs([]string{"gitstream", ev.Repo.Name, ev.Label()})
+	bc.SetSize(w, 1)
+	bc.SetTheme(theme)
+
 	labelStyle := lipgloss.NewStyle().Foreground(theme.Muted)
 	valStyle := lipgloss.NewStyle().Foreground(theme.Text)
 	color := ui.EventColor(ev.Type, theme)
 	typeStyle := lipgloss.NewStyle().Foreground(color).Bold(true)
 
 	lines := []string{
+		bc.View(),
+		"",
 		labelStyle.Render("Type:    ") + typeStyle.Render(ev.Label()),
 		labelStyle.Render("Repo:    ") + valStyle.Render(ev.Repo.Name),
 		labelStyle.Render("Actor:   ") + valStyle.Render(ev.Actor.Login),
