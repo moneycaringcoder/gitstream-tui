@@ -1,11 +1,11 @@
 package ui
 
 import (
-	"fmt"
+	"os/exec"
 	"sync"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	blit "github.com/blitui/blit"
 	"github.com/moneycaringcoder/gitstream-tui/internal/config"
 	"github.com/moneycaringcoder/gitstream-tui/internal/discovery"
 	"github.com/moneycaringcoder/gitstream-tui/internal/github"
@@ -26,108 +26,100 @@ type gitStatusMsg struct {
 	statuses []gitstatus.RepoStatus
 }
 
-// eventCache stores last successful events per repo for fallback.
-var (
-	eventCacheMu sync.Mutex
-	eventCache   = make(map[string][]github.Event)
-)
-
-// fetchWithRetries fetches events with up to 3 retries and exponential backoff.
-func fetchWithRetries(repo string, limit, page int) (*github.FetchResult, error) {
-	var lastErr error
-	backoff := 500 * time.Millisecond
-	for attempt := 0; attempt < 3; attempt++ {
-		result, err := github.FetchEvents(repo, limit, page)
-		if err == nil {
-			return result, nil
-		}
-		lastErr = err
-		if attempt < 2 {
-			time.Sleep(backoff)
-			backoff *= 2
+// githubToken resolves a GitHub API token via `gh auth token` or
+// the GITHUB_TOKEN environment variable. Returns "" if unavailable.
+func githubToken() string {
+	// Try gh CLI first
+	out, err := exec.Command("gh", "auth", "token").Output()
+	if err == nil {
+		if token := trimNewline(string(out)); token != "" {
+			return token
 		}
 	}
-	return nil, lastErr
+	return ""
 }
 
+func trimNewline(s string) string {
+	for i := len(s) - 1; i >= 0; i-- {
+		if s[i] == '\n' || s[i] == '\r' {
+			continue
+		}
+		return s[:i+1]
+	}
+	return ""
+}
+
+// pollEvents uses blit.HTTPResource to fetch GitHub events with ETag caching,
+// rate-limit tracking, and response fallback.
 func pollEvents(cfg *config.Config, debugLog *DebugLog, initial bool) tea.Cmd {
 	return func() tea.Msg {
-		type result struct {
-			events []github.Event
-			errs   []string
-		}
-
+		token := githubToken()
 		repos := cfg.Repos()
-		var wg sync.WaitGroup
-		results := make([]result, len(repos))
-
 		pages := 1
 		if initial {
 			pages = 2
 		}
 
-		var rlMu sync.Mutex
-		latestRL := github.RateLimit{}
+		var wg sync.WaitGroup
+		type result struct {
+			events []github.Event
+			errs   []string
+		}
+		results := make([]result, len(repos))
 
 		for idx, repo := range repos {
 			wg.Add(1)
 			go func(i int, r string) {
 				defer wg.Done()
+
+				hr := blit.NewHTTPResource(blit.HTTPResourceOpts{
+					Name:  r,
+					Pages: pages,
+					BuildURL: func(page int) string {
+						return blit.GitHubAPIURL("repos/"+r+"/events", 30, page)
+					},
+					Parse:         blit.ParseJSONSlice[github.Event](),
+					ExtraHeaders: func() map[string]string {
+						if token != "" {
+							return map[string]string{
+								"Authorization": "Bearer " + token,
+								"Accept":        "application/vnd.github+json",
+							}
+						}
+						return map[string]string{
+							"Accept": "application/vnd.github+json",
+						}
+					},
+					CacheResponses: true,
+					Parallel:       true,
+					OnRateLimit: func(remaining, limit int) {
+						debugLog.SetRateLimit(remaining, limit)
+					},
+				})
+				hr.SetStatsCollector(debugLog.Stats())
+
+				msg := hr.PollCmd()()
+
+				httpMsg := msg.(blit.HTTPResultMsg)
 				var allEvents []github.Event
-				var errs []string
-				fetchFailed := false
-				notModifiedCount := 0
-
-				for page := 1; page <= pages; page++ {
-					fr, err := fetchWithRetries(r, 30, page)
-					if err != nil {
-						errs = append(errs, fmt.Sprintf("%s page %d: %v (3 retries exhausted)", r, page, err))
-						fetchFailed = true
-						continue
-					}
-
-					if fr.RateLimit > 0 {
-						rlMu.Lock()
-						latestRL = github.RateLimit{Remaining: fr.RateRemain, Limit: fr.RateLimit}
-						rlMu.Unlock()
-					}
-
-					if fr.NotModified {
-						notModifiedCount++
-						debugLog.Info("304 Not Modified for %s (page %d) — no rate limit cost", r, page)
-						continue
-					}
-
-					allEvents = append(allEvents, fr.Events...)
-					debugLog.Info("Fetched %d events from %s (page %d)", len(fr.Events), r, page)
-				}
-
-				if notModifiedCount == pages && !fetchFailed {
-					eventCacheMu.Lock()
-					cached := eventCache[r]
-					eventCacheMu.Unlock()
-					if len(cached) > 0 {
-						debugLog.RecordFetch(r, true, len(cached), false)
-						results[i] = result{events: cached}
-						return
+				for _, res := range httpMsg.Results {
+					if slice, ok := res.([]github.Event); ok {
+						allEvents = append(allEvents, slice...)
 					}
 				}
 
-				if len(allEvents) == 0 && fetchFailed {
-					eventCacheMu.Lock()
-					cached := eventCache[r]
-					eventCacheMu.Unlock()
-					if len(cached) > 0 {
-						debugLog.Warn("Using cached events for %s (%d events)", r, len(cached))
-						debugLog.RecordFetch(r, false, 0, true)
-						results[i] = result{events: cached, errs: errs}
-						return
-					}
-					debugLog.RecordFetch(r, false, 0, false)
-					results[i] = result{errs: errs}
+				if httpMsg.IsAllNotModified() && len(allEvents) == 0 {
+					// All pages 304 — stats collector already recorded cached
+					results[i] = result{}
 					return
 				}
 
+				if len(httpMsg.Errors) > 0 && len(allEvents) == 0 {
+					results[i] = result{errs: httpMsg.Errors}
+					return
+				}
+
+				// Deduplicate by event ID
 				seen := make(map[string]bool)
 				var deduped []github.Event
 				for _, ev := range allEvents {
@@ -136,17 +128,11 @@ func pollEvents(cfg *config.Config, debugLog *DebugLog, initial bool) tea.Cmd {
 						deduped = append(deduped, ev)
 					}
 				}
-
 				if len(deduped) > 50 {
 					deduped = deduped[:50]
 				}
 
-				eventCacheMu.Lock()
-				eventCache[r] = deduped
-				eventCacheMu.Unlock()
-
-				debugLog.RecordFetch(r, true, len(deduped), false)
-
+				// Enrich push events with compare data
 				var ewg sync.WaitGroup
 				for j := range deduped {
 					if deduped[j].Type == "PushEvent" {
@@ -159,7 +145,7 @@ func pollEvents(cfg *config.Config, debugLog *DebugLog, initial bool) tea.Cmd {
 				}
 				ewg.Wait()
 
-				results[i] = result{events: deduped, errs: errs}
+				results[i] = result{events: deduped, errs: httpMsg.Errors}
 			}(idx, repo)
 		}
 		wg.Wait()
@@ -169,10 +155,6 @@ func pollEvents(cfg *config.Config, debugLog *DebugLog, initial bool) tea.Cmd {
 		for _, r := range results {
 			all = append(all, r.events...)
 			allErrors = append(allErrors, r.errs...)
-		}
-
-		if latestRL.Limit > 0 {
-			debugLog.SetRateLimit(latestRL.Remaining, latestRL.Limit)
 		}
 
 		return eventsMsg{events: all, errors: allErrors}

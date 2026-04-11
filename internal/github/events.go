@@ -4,9 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
-	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -81,7 +79,7 @@ type CompareResult struct {
 	} `json:"files"`
 }
 
-// FetchCompare gets diff stats between two commits.
+// FetchCompare gets diff stats between two commits via gh api.
 func FetchCompare(repo, base, head string) (*CompareResult, error) {
 	cmd := exec.Command("gh", "api", fmt.Sprintf("repos/%s/compare/%s...%s", repo, base, head),
 		"--jq", `{total_commits: .total_commits, files: [.files[] | {filename, additions, deletions, changes}]}`)
@@ -96,140 +94,11 @@ func FetchCompare(repo, base, head string) (*CompareResult, error) {
 	return &result, nil
 }
 
-// etagCache stores ETags per URL for conditional requests.
-var (
-	etagMu    sync.Mutex
-	etagStore = make(map[string]string) // url -> etag
-)
-
-// FetchResult holds the outcome of an ETag-aware fetch.
-type FetchResult struct {
-	Events      []Event
-	NotModified bool // true if 304 — data unchanged, didn't cost a rate limit point
-	RateRemain  int  // parsed from X-RateLimit-Remaining header
-	RateLimit   int  // parsed from X-RateLimit-Limit header
-}
-
-// FetchEvents fetches recent events for a repo using the gh CLI with ETag support.
-// page is 1-indexed; each page returns up to 30 events from the API.
-// When the server returns 304 Not Modified, NotModified is true and Events is nil.
-func FetchEvents(repo string, limit int, page int) (*FetchResult, error) {
-	if page < 1 {
-		page = 1
-	}
-	url := fmt.Sprintf("repos/%s/events?per_page=30&page=%d", repo, page)
-
-	args := []string{"api", url, "--include", "--cache", "0s"}
-
-	// Add ETag header if we have one cached
-	etagMu.Lock()
-	etag := etagStore[url]
-	etagMu.Unlock()
-	if etag != "" {
-		args = append(args, "-H", fmt.Sprintf("If-None-Match: %s", etag))
-	}
-
-	cmd := exec.Command("gh", args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		outStr := string(out)
-		// gh exits non-zero on 304 — check if it's a Not Modified response
-		if strings.Contains(outStr, "304 Not Modified") || strings.Contains(outStr, "HTTP/2.0 304") {
-			rl := parseRateLimitHeaders(outStr)
-			return &FetchResult{NotModified: true, RateRemain: rl.Remaining, RateLimit: rl.Limit}, nil
-		}
-		return nil, fmt.Errorf("gh api failed for %s (page %d): %w", repo, page, err)
-	}
-
-	// Parse headers and body from --include output
-	outStr := string(out)
-	headerEnd, body := splitHeaderBody(outStr)
-
-	// Extract and cache the ETag
-	if newEtag := parseHeader(headerEnd, "ETag"); newEtag != "" {
-		etagMu.Lock()
-		etagStore[url] = newEtag
-		etagMu.Unlock()
-	}
-
-	// Parse rate limit from headers
-	rl := parseRateLimitHeaders(headerEnd)
-
-	var events []Event
-	if err := json.Unmarshal([]byte(body), &events); err != nil {
-		return nil, fmt.Errorf("json parse failed for %s: %w", repo, err)
-	}
-
-	if len(events) > limit {
-		events = events[:limit]
-	}
-
-	return &FetchResult{Events: events, RateRemain: rl.Remaining, RateLimit: rl.Limit}, nil
-}
-
-// splitHeaderBody splits `gh api --include` output into headers and JSON body.
-func splitHeaderBody(raw string) (headers string, body string) {
-	// gh --include outputs: HTTP status line, headers, blank line, then JSON body
-	// Find the first '{' or '[' that starts the JSON body
-	for i, ch := range raw {
-		if ch == '[' || ch == '{' {
-			return raw[:i], raw[i:]
-		}
-	}
-	return raw, ""
-}
-
-// parseHeader extracts a header value from raw header text.
-func parseHeader(headers, name string) string {
-	lower := strings.ToLower(name)
-	for _, line := range strings.Split(headers, "\n") {
-		if idx := strings.Index(line, ":"); idx > 0 {
-			key := strings.TrimSpace(line[:idx])
-			if strings.ToLower(key) == lower {
-				return strings.TrimSpace(line[idx+1:])
-			}
-		}
-	}
-	return ""
-}
-
-// RateLimit holds GitHub API rate limit info.
-type RateLimit struct {
-	Remaining int
-	Limit     int
-}
-
-func parseRateLimitHeaders(headers string) RateLimit {
-	var rl RateLimit
-	if v := parseHeader(headers, "X-RateLimit-Remaining"); v != "" {
-		rl.Remaining, _ = strconv.Atoi(v)
-	}
-	if v := parseHeader(headers, "X-RateLimit-Limit"); v != "" {
-		rl.Limit, _ = strconv.Atoi(v)
-	}
-	return rl
-}
-
-// FetchRateLimit queries the GitHub API rate limit.
-func FetchRateLimit() (*RateLimit, error) {
-	cmd := exec.Command("gh", "api", "rate_limit", "--jq", ".rate | {remaining, limit}")
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, err
-	}
-	var rl RateLimit
-	if err := json.Unmarshal(out, &rl); err != nil {
-		return nil, err
-	}
-	return &rl, nil
-}
-
 // EnrichPushEvent fetches compare stats and populates the event's detail cache.
 func EnrichPushEvent(ev *Event) {
 	if ev.Type != "PushEvent" || ev.Payload.Before == "" || ev.Payload.Head == "" {
 		return
 	}
-	// Skip if before is all zeros (new branch)
 	if ev.Payload.Before == "0000000000000000000000000000000000000000" {
 		return
 	}
@@ -239,7 +108,6 @@ func EnrichPushEvent(ev *Event) {
 	}
 	ev.CompareData = result
 }
-
 
 // Label returns a short human-readable label for an event type.
 func (e *Event) Label() string {

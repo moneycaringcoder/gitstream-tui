@@ -3,12 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	blit "github.com/blitui/blit"
 	"github.com/moneycaringcoder/gitstream-tui/internal/config"
 	"github.com/moneycaringcoder/gitstream-tui/internal/github"
@@ -111,7 +108,7 @@ func main() {
 		Render: func(de ui.DisplayEvent, w, h int, theme blit.Theme) string {
 			return renderEventDetail(de, w, theme)
 		},
-		OnKey: func(de ui.DisplayEvent, key tea.KeyMsg) tea.Cmd {
+		OnKey: func(de ui.DisplayEvent, key blit.KeyMsg) blit.Cmd {
 			if key.String() == "o" {
 				if url := de.Event.URL(); url != "" {
 					blit.OpenURL(url)
@@ -126,76 +123,8 @@ func main() {
 	})
 	stream.DetailOverlay = detailOverlay
 
-	// Config editor using blit.ConfigEditor
-	configEditor := blit.NewConfigEditor([]blit.ConfigField{
-		{
-			Label: "Interval (sec)",
-			Group: "Polling",
-			Hint:  "How often to poll GitHub for new events (min 5)",
-			Get:   func() string { return strconv.Itoa(cfg.Interval) },
-			Validate: func(v string) error {
-				n, err := strconv.Atoi(v)
-				if err != nil || n < 5 {
-					return fmt.Errorf("must be a number >= 5")
-				}
-				return nil
-			},
-			Set: func(v string) error {
-				n, _ := strconv.Atoi(v)
-				cfg.Interval = n
-				return config.Save(cfg)
-			},
-		},
-		{
-			Label: "Add repo",
-			Group: "Repos",
-			Hint:  "Add a new repo to watch (owner/repo format)",
-			Get:   func() string { return "" },
-			Validate: func(v string) error {
-				v = strings.TrimSpace(v)
-				if v == "" || !strings.Contains(v, "/") {
-					return fmt.Errorf("must be owner/repo format")
-				}
-				for _, r := range cfg.RepoEntries {
-					if r.Name == v {
-						return fmt.Errorf("repo already exists")
-					}
-				}
-				return nil
-			},
-			Set: func(v string) error {
-				v = strings.TrimSpace(v)
-				cfg.RepoEntries = append(cfg.RepoEntries, config.RepoEntry{Name: v})
-				return config.Save(cfg)
-			},
-		},
-		{
-			Label: "Remove repo",
-			Group: "Repos",
-			Hint:  "Remove a watched repo (owner/repo format)",
-			Get:   func() string { return "" },
-			Validate: func(v string) error {
-				v = strings.TrimSpace(v)
-				for _, r := range cfg.RepoEntries {
-					if r.Name == v {
-						return nil
-					}
-				}
-				return fmt.Errorf("repo not found")
-			},
-			Set: func(v string) error {
-				v = strings.TrimSpace(v)
-				filtered := make([]config.RepoEntry, 0, len(cfg.RepoEntries))
-				for _, r := range cfg.RepoEntries {
-					if r.Name != v {
-						filtered = append(filtered, r)
-					}
-				}
-				cfg.RepoEntries = filtered
-				return config.Save(cfg)
-			},
-		},
-	})
+	// Config editor auto-generated from blit struct tags
+	configEditor := config.Editor()
 
 	// Signal-driven status bar. Set() is called via goroutine to avoid
 	// deadlocking — bubbletea's p.msgs is unbuffered, and Signal.Set triggers
@@ -226,7 +155,7 @@ func main() {
 	cmdBar := blit.NewCommandBar([]blit.Command{
 		{
 			Name: "add", Args: true, Hint: "Add a repo (owner/repo)",
-			Run: func(args string) tea.Cmd {
+			Run: func(args string) blit.Cmd {
 				args = strings.TrimSpace(args)
 				if args == "" || !strings.Contains(args, "/") {
 					return nil
@@ -238,7 +167,7 @@ func main() {
 		},
 		{
 			Name: "remove", Aliases: []string{"rm"}, Args: true, Hint: "Remove a repo",
-			Run: func(args string) tea.Cmd {
+			Run: func(args string) blit.Cmd {
 				args = strings.TrimSpace(args)
 				filtered := make([]config.RepoEntry, 0, len(cfg.RepoEntries))
 				for _, r := range cfg.RepoEntries {
@@ -253,7 +182,7 @@ func main() {
 		},
 		{
 			Name: "sort", Args: true, Hint: "Sort newest|oldest",
-			Run: func(args string) tea.Cmd {
+			Run: func(args string) blit.Cmd {
 				args = strings.TrimSpace(args)
 				if args == "newest" && !stream.IsNewestFirst() {
 					stream.ToggleSort()
@@ -267,7 +196,7 @@ func main() {
 		},
 		{
 			Name: "filter", Args: true, Hint: "filter repo:<name> or type:<type>",
-			Run: func(args string) tea.Cmd {
+			Run: func(args string) blit.Cmd {
 				args = strings.TrimSpace(args)
 				if strings.HasPrefix(args, "repo:") {
 					stream.SetRepoFilter(strings.TrimPrefix(args, "repo:"))
@@ -281,7 +210,7 @@ func main() {
 		},
 		{
 			Name: "clear", Hint: "Clear all filters",
-			Run: func(_ string) tea.Cmd {
+			Run: func(_ string) blit.Cmd {
 				stream.ClearFilters()
 				updateStatusRight()
 				return nil
@@ -289,7 +218,7 @@ func main() {
 		},
 		{
 			Name: "theme", Args: true, Hint: "Set theme by name",
-			Run: func(args string) tea.Cmd {
+			Run: func(args string) blit.Cmd {
 				args = strings.TrimSpace(args)
 				if t, ok := presets[args]; ok {
 					cfg.Theme = args
@@ -301,7 +230,7 @@ func main() {
 		},
 		{
 			Name: "quit", Aliases: []string{"q"}, Hint: "Quit",
-			Run: func(_ string) tea.Cmd { return tea.Quit },
+			Run: func(_ string) blit.Cmd { return blit.Quit },
 		},
 	})
 
@@ -427,9 +356,14 @@ func main() {
 		blit.WithAnimations(true),
 	)
 
-	if err := app.Run(); err != nil {
+	action, err := app.Run()
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
+	}
+	if action == blit.UpdateActionRestart {
+		fmt.Fprintln(os.Stderr, "Update installed. Please restart gitstream.")
+		os.Exit(0)
 	}
 }
 
@@ -472,10 +406,10 @@ func renderEventDetail(de ui.DisplayEvent, w int, theme blit.Theme) string {
 	bc.SetSize(w, 1)
 	bc.SetTheme(theme)
 
-	labelStyle := lipgloss.NewStyle().Foreground(theme.Muted)
-	valStyle := lipgloss.NewStyle().Foreground(theme.Text)
+	labelStyle := blit.NewStyle().Foreground(theme.Muted)
+	valStyle := blit.NewStyle().Foreground(theme.Text)
 	color := ui.EventColor(ev.Type, theme)
-	typeStyle := lipgloss.NewStyle().Foreground(color).Bold(true)
+	typeStyle := blit.NewStyle().Foreground(color).Bold(true)
 
 	lines := []string{
 		bc.View(),
@@ -512,7 +446,7 @@ func renderEventDetail(de ui.DisplayEvent, w int, theme blit.Theme) string {
 	if len(ev.Payload.Commits) > 0 {
 		lines = append(lines, "")
 		lines = append(lines, labelStyle.Render("Commits:"))
-		shaStyle := lipgloss.NewStyle().Foreground(theme.Warn)
+		shaStyle := blit.NewStyle().Foreground(theme.Warn)
 		for _, c := range ev.Payload.Commits {
 			sha := c.SHA
 			if len(sha) > 7 {
@@ -568,8 +502,8 @@ func renderEventDetail(de ui.DisplayEvent, w int, theme blit.Theme) string {
 	if cd := ev.CompareData; cd != nil {
 		lines = append(lines, "")
 		lines = append(lines, labelStyle.Render(fmt.Sprintf("Files changed: %d, Commits: %d", len(cd.Files), cd.TotalCommits)))
-		addStyle := lipgloss.NewStyle().Foreground(theme.Positive)
-		delStyle := lipgloss.NewStyle().Foreground(theme.Negative)
+		addStyle := blit.NewStyle().Foreground(theme.Positive)
+		delStyle := blit.NewStyle().Foreground(theme.Negative)
 		for _, f := range cd.Files {
 			adds := addStyle.Render(fmt.Sprintf("+%d", f.Additions))
 			dels := delStyle.Render(fmt.Sprintf("-%d", f.Deletions))
@@ -588,7 +522,7 @@ func resolveTheme(name string) blit.Theme {
 		}
 	}
 	t := blit.DefaultTheme()
-	t.Extra = map[string]lipgloss.Color{
+	t.Extra = map[string]blit.Color{
 		"info":    "#06b6d4",
 		"create":  "#22c55e",
 		"delete":  "#ef4444",
