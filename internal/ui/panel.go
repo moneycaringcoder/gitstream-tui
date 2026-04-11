@@ -5,7 +5,6 @@ import (
 	"sort"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
 	blit "github.com/blitui/blit"
 	"github.com/moneycaringcoder/gitstream-tui/internal/gitstatus"
 )
@@ -47,11 +46,11 @@ func NewStatusPanel() *StatusPanel {
 	return p
 }
 
-func (p *StatusPanel) Init() tea.Cmd { return nil }
+func (p *StatusPanel) Init() blit.Cmd { return nil }
 
-func (p *StatusPanel) Update(msg tea.Msg, ctx blit.Context) (blit.Component, tea.Cmd) {
+func (p *StatusPanel) Update(msg blit.Msg, ctx blit.Context) (blit.Component, blit.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case blit.KeyMsg:
 		if msg.String() == "enter" || msg.String() == " " {
 			idx := p.listView.CursorIndex()
 			if remote, ok := p.headerMap[idx]; ok {

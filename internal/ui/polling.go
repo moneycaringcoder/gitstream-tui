@@ -4,7 +4,6 @@ import (
 	"os/exec"
 	"sync"
 
-	tea "github.com/charmbracelet/bubbletea"
 	blit "github.com/blitui/blit"
 	"github.com/moneycaringcoder/gitstream-tui/internal/config"
 	"github.com/moneycaringcoder/gitstream-tui/internal/discovery"
@@ -51,8 +50,8 @@ func trimNewline(s string) string {
 
 // pollEvents uses blit.HTTPResource to fetch GitHub events with ETag caching,
 // rate-limit tracking, and response fallback.
-func pollEvents(cfg *config.Config, debugLog *DebugLog, initial bool) tea.Cmd {
-	return func() tea.Msg {
+func pollEvents(cfg *config.Config, debugLog *DebugLog, initial bool) blit.Cmd {
+	return func() blit.Msg {
 		token := githubToken()
 		repos := cfg.Repos()
 		pages := 1
@@ -161,15 +160,15 @@ func pollEvents(cfg *config.Config, debugLog *DebugLog, initial bool) tea.Cmd {
 	}
 }
 
-func discoverRepos(cfg *config.Config) tea.Cmd {
-	return func() tea.Msg {
+func discoverRepos(cfg *config.Config) blit.Cmd {
+	return func() blit.Msg {
 		repos := discovery.Discover(cfg.Repos(), cfg.ExplicitPaths())
 		return discoveryMsg{repos: repos}
 	}
 }
 
-func pollGitStatus(repos []discovery.LocalRepo) tea.Cmd {
-	return func() tea.Msg {
+func pollGitStatus(repos []discovery.LocalRepo) blit.Cmd {
+	return func() blit.Msg {
 		var wg sync.WaitGroup
 		statuses := make([]gitstatus.RepoStatus, len(repos))
 		for i, r := range repos {

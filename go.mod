@@ -2,11 +2,7 @@ module github.com/moneycaringcoder/gitstream-tui
 
 go 1.26.1
 
-require (
-	github.com/blitui/blit v0.2.24
-	github.com/charmbracelet/bubbletea v1.3.10
-	github.com/charmbracelet/x/ansi v0.11.6
-)
+require github.com/blitui/blit v0.2.24
 
 require (
 	github.com/alecthomas/chroma/v2 v2.20.0 // indirect
@@ -15,6 +11,7 @@ require (
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/charmbracelet/bubbles v1.0.0 // indirect
+	github.com/charmbracelet/bubbletea v1.3.10 // indirect
 	github.com/charmbracelet/colorprofile v0.4.1 // indirect
 	github.com/charmbracelet/glamour v1.0.0 // indirect
 	github.com/charmbracelet/keygen v0.5.3 // indirect
@@ -22,6 +19,7 @@ require (
 	github.com/charmbracelet/log v0.4.1 // indirect
 	github.com/charmbracelet/ssh v0.0.0-20250128164007-98fd5ae11894 // indirect
 	github.com/charmbracelet/wish v1.4.7 // indirect
+	github.com/charmbracelet/x/ansi v0.11.6 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.15 // indirect
 	github.com/charmbracelet/x/conpty v0.1.0 // indirect
 	github.com/charmbracelet/x/errors v0.0.0-20240508181413-e8d8b6e2de86 // indirect

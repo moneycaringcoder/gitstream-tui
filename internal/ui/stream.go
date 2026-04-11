@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	blit "github.com/blitui/blit"
 	"github.com/moneycaringcoder/gitstream-tui/internal/config"
 	"github.com/moneycaringcoder/gitstream-tui/internal/discovery"
@@ -125,28 +124,28 @@ func NewEventStream(cfg *config.Config, debugLog *DebugLog) *EventStream {
 
 	s.poller = blit.NewPoller(
 		time.Duration(cfg.Interval)*time.Second,
-		func() tea.Cmd {
-			cmds := []tea.Cmd{pollEvents(cfg, debugLog, false)}
+		func() blit.Cmd {
+			cmds := []blit.Cmd{pollEvents(cfg, debugLog, false)}
 			if len(s.localRepos) > 0 {
 				cmds = append(cmds, pollGitStatus(s.localRepos))
 			}
-			return tea.Batch(cmds...)
+			return blit.Batch(cmds...)
 		},
 	)
 
 	return s
 }
 
-func (s *EventStream) Init() tea.Cmd {
-	return tea.Batch(
+func (s *EventStream) Init() blit.Cmd {
+	return blit.Batch(
 		pollEvents(s.cfg, s.debugLog, true),
 		discoverRepos(s.cfg),
 	)
 }
 
-func (s *EventStream) Update(msg tea.Msg, ctx blit.Context) (blit.Component, tea.Cmd) {
+func (s *EventStream) Update(msg blit.Msg, ctx blit.Context) (blit.Component, blit.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case blit.KeyMsg:
 		// Enter opens detail overlay instead of browser
 		if msg.String() == "enter" && s.DetailOverlay != nil {
 			idx := s.table.CursorIndex()
@@ -170,7 +169,7 @@ func (s *EventStream) Update(msg tea.Msg, ctx blit.Context) (blit.Component, tea
 			idx := s.table.CursorIndex()
 			if idx >= 0 && idx < len(s.filteredEvents) {
 				if url := s.filteredEvents[idx].Event.URL(); url != "" {
-					return s, tea.Batch(
+					return s, blit.Batch(
 						blit.CopyToClipboardCmd(url),
 						blit.ToastSuccess("Copied", url),
 						blit.Consumed(),
@@ -227,7 +226,7 @@ func (s *EventStream) Update(msg tea.Msg, ctx blit.Context) (blit.Component, tea
 	return s, nil
 }
 
-func (s *EventStream) handleEvents(msg eventsMsg) (blit.Component, tea.Cmd) {
+func (s *EventStream) handleEvents(msg eventsMsg) (blit.Component, blit.Cmd) {
 	for _, e := range msg.errors {
 		s.debugLog.Error("%s", e)
 	}
@@ -264,7 +263,7 @@ func (s *EventStream) handleEvents(msg eventsMsg) (blit.Component, tea.Cmd) {
 		}
 	}
 
-	var cmds []tea.Cmd
+	var cmds []blit.Cmd
 
 	if newCount > 0 && !s.isAtNewEdge() {
 		cmds = append(cmds, blit.ToastInfo("New events",
@@ -285,10 +284,10 @@ func (s *EventStream) handleEvents(msg eventsMsg) (blit.Component, tea.Cmd) {
 		}
 	}
 
-	return s, tea.Batch(cmds...)
+	return s, blit.Batch(cmds...)
 }
 
-func (s *EventStream) handleGitStatus(msg gitStatusMsg) (blit.Component, tea.Cmd) {
+func (s *EventStream) handleGitStatus(msg gitStatusMsg) (blit.Component, blit.Cmd) {
 	now := time.Now()
 	newLocal := 0
 	for _, st := range msg.statuses {
