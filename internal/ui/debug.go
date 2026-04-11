@@ -1,13 +1,10 @@
 package ui
 
 import (
-	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	blit "github.com/blitui/blit"
 	"github.com/blitui/blit/charts"
@@ -89,14 +86,14 @@ func (d *DebugOverlay) View() string {
 	content = strings.Join(cLines, "\n")
 
 	// Render the bordered box
-	title := lipgloss.NewStyle().
+	title := blit.NewStyle().
 		Bold(true).
 		Foreground(th.Accent).
 		Render(" Debug Console ")
 
-	box := lipgloss.NewStyle().
-		Width(textW + 2). // +2 for padding(0,1)
-		Border(lipgloss.RoundedBorder()).
+	box := blit.NewStyle().
+		Width(textW + 2).
+		Border(blit.RoundedBorder()).
 		BorderForeground(th.Border).
 		Foreground(th.Text).
 		Padding(0, 1)
@@ -106,8 +103,8 @@ func (d *DebugOverlay) View() string {
 	// Inject title into the top border
 	lines := strings.Split(rendered, "\n")
 	if len(lines) > 0 {
-		borderWidth := lipgloss.Width(lines[0])
-		titleWidth := lipgloss.Width(title)
+		borderWidth := blit.Width(lines[0])
+		titleWidth := blit.Width(title)
 		if titleWidth+4 < borderWidth {
 			pos := (borderWidth - titleWidth) / 2
 			runes := []rune(lines[0])
@@ -135,51 +132,13 @@ func (d *DebugOverlay) View() string {
 
 // renderStats builds the stats section (API stats, repo health, rate limit, bar chart).
 func (d *DebugOverlay) renderStats(textW int) string {
-	var b strings.Builder
 	th := d.theme
 	stats := d.debugLog.GetStats()
 
-	statsHeader := lipgloss.NewStyle().Foreground(th.Accent).Bold(true)
-	dim := lipgloss.NewStyle().Foreground(th.Muted)
-	errStyle := lipgloss.NewStyle().Foreground(th.Negative)
+	// Use StatsCollector.View() for the standard stats rendering
+	statsView := d.debugLog.Stats().View(textW, 20, th)
 
-	b.WriteString(statsHeader.Render("API Stats") + "\n")
-	b.WriteString(dim.Render(fmt.Sprintf("  Total calls:  %d", stats.TotalCalls)) + "\n")
-	b.WriteString(dim.Render(fmt.Sprintf("  Successful:   %d", stats.SuccessCalls)) + "\n")
-	if stats.FailedCalls > 0 {
-		b.WriteString(errStyle.Render(fmt.Sprintf("  Failed:       %d", stats.FailedCalls)) + "\n")
-	} else {
-		b.WriteString(dim.Render(fmt.Sprintf("  Failed:       %d", stats.FailedCalls)) + "\n")
-	}
-	b.WriteString(dim.Render(fmt.Sprintf("  Total events: %d", stats.TotalEvents)) + "\n")
-	if !stats.LastFetchAt.IsZero() {
-		ago := time.Since(stats.LastFetchAt).Truncate(time.Second)
-		b.WriteString(dim.Render(fmt.Sprintf("  Last fetch:   %s ago", ago)) + "\n")
-	}
-
-	// Sorted repo keys for stable render order
-	repoKeys := make([]string, 0, len(stats.RepoHealth))
-	for repo := range stats.RepoHealth {
-		repoKeys = append(repoKeys, repo)
-	}
-	sort.Strings(repoKeys)
-
-	if len(repoKeys) > 0 {
-		b.WriteString("\n")
-		b.WriteString(statsHeader.Render("Repo Health") + "\n")
-		for _, repo := range repoKeys {
-			h := stats.RepoHealth[repo]
-			var badge string
-			if h.LastSuccess {
-				badge = blit.Badge("OK", th.Positive, true)
-			} else {
-				badge = blit.Badge("FAIL", th.Negative, true)
-			}
-			b.WriteString(fmt.Sprintf("  %s %s", badge, dim.Render(repo)) + "\n")
-		}
-	}
-
-	// Cap chart width: at most 60 cols or half the text area, whichever is larger
+	// Append per-repo bar chart
 	chartW := textW / 2
 	if chartW < 30 {
 		chartW = 30
@@ -191,29 +150,18 @@ func (d *DebugOverlay) renderStats(textW int) string {
 		chartW = textW - 2
 	}
 
-	// Rate limit gauge
-	if stats.RateLimit > 0 {
-		b.WriteString("\n")
-		b.WriteString(statsHeader.Render("Rate Limit") + "\n")
-		gauge := charts.NewGauge(
-			float64(stats.RateRemain),
-			float64(stats.RateLimit),
-			[]float64{float64(stats.RateLimit) * 0.2, float64(stats.RateLimit) * 0.5},
-			fmt.Sprintf("%d/%d", stats.RateRemain, stats.RateLimit),
-		)
-		gauge.SetTheme(th)
-		gauge.SetSize(chartW, 1)
-		b.WriteString("  " + gauge.View() + "\n")
+	repoKeys := make([]string, 0, len(stats.Sources))
+	for repo := range stats.Sources {
+		repoKeys = append(repoKeys, repo)
 	}
+	sort.Strings(repoKeys)
 
-	// Per-repo bar chart
 	if len(repoKeys) > 0 {
-		b.WriteString("\n")
-		b.WriteString(statsHeader.Render("Events by Repo") + "\n")
+		statsHeader := blit.NewStyle().Foreground(th.Accent).Bold(true)
 		var data []float64
 		var labels []string
 		for _, repo := range repoKeys {
-			h := stats.RepoHealth[repo]
+			h := stats.Sources[repo]
 			short := repo
 			if i := strings.LastIndex(repo, "/"); i >= 0 {
 				short = repo[i+1:]
@@ -228,10 +176,16 @@ func (d *DebugOverlay) renderStats(textW int) string {
 		bar := charts.NewBar(data, labels, true)
 		bar.SetTheme(th)
 		bar.SetSize(chartW, len(labels)+1)
+
+		var b strings.Builder
+		b.WriteString(statsView)
+		b.WriteString("\n")
+		b.WriteString(statsHeader.Render("Events by Repo") + "\n")
 		b.WriteString("  " + bar.View())
+		return b.String()
 	}
 
-	return b.String()
+	return statsView
 }
 
 func (d *DebugOverlay) KeyBindings() []blit.KeyBind {

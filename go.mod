@@ -3,9 +3,8 @@ module github.com/moneycaringcoder/gitstream-tui
 go 1.26.1
 
 require (
-	github.com/blitui/blit v0.1.2
+	github.com/blitui/blit v0.2.24
 	github.com/charmbracelet/bubbletea v1.3.10
-	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
 	github.com/charmbracelet/x/ansi v0.11.6
 )
 
@@ -19,6 +18,7 @@ require (
 	github.com/charmbracelet/colorprofile v0.4.1 // indirect
 	github.com/charmbracelet/glamour v1.0.0 // indirect
 	github.com/charmbracelet/keygen v0.5.3 // indirect
+	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834 // indirect
 	github.com/charmbracelet/log v0.4.1 // indirect
 	github.com/charmbracelet/ssh v0.0.0-20250128164007-98fd5ae11894 // indirect
 	github.com/charmbracelet/wish v1.4.7 // indirect

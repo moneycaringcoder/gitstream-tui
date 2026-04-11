@@ -20,13 +20,11 @@ type RepoEntry struct {
 //	  - name: owner/repo
 //	    path: /home/user/projects/repo
 func (r *RepoEntry) UnmarshalYAML(unmarshal func(interface{}) error) error {
-	// Try plain string first
 	var s string
 	if err := unmarshal(&s); err == nil {
 		r.Name = s
 		return nil
 	}
-	// Otherwise struct
 	type raw RepoEntry
 	return unmarshal((*raw)(r))
 }
@@ -40,10 +38,12 @@ func (r RepoEntry) MarshalYAML() (interface{}, error) {
 	return (raw)(r), nil
 }
 
+// Config holds the application configuration.
+// blit struct tags enable auto-generated ConfigEditor and CLI commands.
 type Config struct {
-	RepoEntries []RepoEntry `yaml:"repos"`
-	Interval    int         `yaml:"interval"`
-	Theme       string      `yaml:"theme,omitempty"`
+	RepoEntries []RepoEntry `yaml:"repos" blit:"label=Repos,group=Config,hint=Watched repos (owner/repo format)"`
+	Interval    int         `yaml:"interval" blit:"label=Interval (sec),group=Polling,hint=Poll frequency (min 5),default=30,min=5"`
+	Theme       string      `yaml:"theme,omitempty" blit:"label=Theme,group=Appearance,hint=Theme name (use ctrl+t to pick),readonly=true"`
 }
 
 // Repos returns just the repo name strings for backward compatibility.
@@ -66,40 +66,56 @@ func (c *Config) ExplicitPaths() map[string]string {
 	return m
 }
 
-func DefaultPath() string {
-	p, err := blit.DefaultConfigPath("gitstream")
-	if err != nil {
-		home, _ := os.UserHomeDir()
-		return home + "/.config/gitstream/config.yaml"
-	}
-	return p
-}
+// blitCfg is the blit.Config wrapper. Initialized on first Load.
+var blitCfg *blit.Config[Config]
 
+// Load loads the config using blit.Config[T] with struct tag defaults.
 func Load() (*Config, error) {
-	path := DefaultPath()
-
-	var cfg Config
-	if err := blit.LoadYAML(path, &cfg); err != nil {
-		return nil, err
-	}
-
-	// LoadYAML returns nil for missing files, so check if we got anything.
-	if cfg.RepoEntries == nil {
-		// Check if the file actually exists to give a helpful message.
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			return nil, fmt.Errorf("no config found at %s - run 'gitstream add owner/repo' to get started", path)
+	var err error
+	if blitCfg == nil {
+		blitCfg, err = blit.LoadConfig[Config]("gitstream")
+		if err != nil {
+			// Check if the file doesn't exist to give a helpful message.
+			path, pathErr := blit.DefaultConfigPath("gitstream")
+			if pathErr == nil {
+				if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
+					return nil, fmt.Errorf("no config found at %s - run 'gitstream add owner/repo' to get started", path)
+				}
+			}
+			return nil, err
 		}
 	}
-
-	if cfg.Interval <= 0 {
-		cfg.Interval = 30
-	}
-
-	return &cfg, nil
+	return &blitCfg.Value, nil
 }
 
+// Save persists the current config value.
 func Save(cfg *Config) error {
-	return blit.SaveYAML(DefaultPath(), cfg)
+	if blitCfg != nil {
+		blitCfg.Value = *cfg
+		return blitCfg.Save()
+	}
+	path, _ := blit.DefaultConfigPath("gitstream")
+	return blit.SaveYAML(path, cfg)
+}
+
+// Editor returns a blit.ConfigEditor auto-generated from struct tags.
+func Editor() *blit.ConfigEditor {
+	if blitCfg == nil {
+		if _, err := Load(); err != nil {
+			return nil
+		}
+	}
+	return blitCfg.Editor()
+}
+
+// CLICommands returns auto-generated CLI commands for config fields.
+func CLICommands() map[string]blit.CLICommand {
+	if blitCfg == nil {
+		if _, err := Load(); err != nil {
+			return nil
+		}
+	}
+	return blitCfg.CLICommands()
 }
 
 func AddRepo(repo string) error {
@@ -109,6 +125,10 @@ func AddRepo(repo string) error {
 	cfg, err := Load()
 	if err != nil {
 		cfg = &Config{Interval: 30}
+		blitCfg, _ = blit.LoadConfig[Config]("gitstream")
+		if blitCfg != nil {
+			blitCfg.Value = *cfg
+		}
 	}
 
 	for _, r := range cfg.RepoEntries {
