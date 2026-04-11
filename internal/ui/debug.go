@@ -4,8 +4,6 @@ import (
 	"sort"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/x/ansi"
 	blit "github.com/blitui/blit"
 	"github.com/blitui/blit/charts"
 )
@@ -32,9 +30,9 @@ func NewDebugOverlay(debugLog *DebugLog) *DebugOverlay {
 	}
 }
 
-func (d *DebugOverlay) Init() tea.Cmd { return nil }
+func (d *DebugOverlay) Init() blit.Cmd { return nil }
 
-func (d *DebugOverlay) Update(msg tea.Msg, ctx blit.Context) (blit.Component, tea.Cmd) {
+func (d *DebugOverlay) Update(msg blit.Msg, ctx blit.Context) (blit.Component, blit.Cmd) {
 	comp, cmd := d.logViewer.Update(msg, ctx)
 	if lv, ok := comp.(*blit.LogViewer); ok {
 		d.logViewer = lv
@@ -122,8 +120,8 @@ func (d *DebugOverlay) View() string {
 		lines = append(lines, "")
 	}
 	for i, line := range lines {
-		if ansi.StringWidth(line) > d.width {
-			lines[i] = ansi.Truncate(line, d.width, "")
+		if blit.StringWidth(line) > d.width {
+			lines[i] = blit.TruncateWith(line, d.width, "")
 		}
 	}
 
